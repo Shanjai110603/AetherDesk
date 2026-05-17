@@ -12,6 +12,13 @@ import { dispatchAnnotation } from '../../core/events/aetherDeskEvents';
 
 interface Point { x: number; y: number }
 interface Stroke { points: Point[] }
+interface TargetHighlight {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+}
 
 export type AnnotationMode = 'draw' | 'click';
 
@@ -41,7 +48,9 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
   const [mode, setMode] = useState<AnnotationMode>('draw');
   const [note, setNote] = useState('');
   const strokesRef = useRef<Stroke[]>([]);
+  const targetsRef = useRef<TargetHighlight[]>([]);
   const drawingRef = useRef<Stroke | null>(null);
+  const targetLabelRef = useRef<string | undefined>(undefined);
   const [hasInk, setHasInk] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -77,6 +86,33 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
       }
       ctx.stroke();
     }
+
+    ctx.save();
+    ctx.strokeStyle = TARGET_COLOR;
+    ctx.fillStyle = TARGET_COLOR;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.setLineDash([6 * dpr, 4 * dpr]);
+    ctx.font = `${11 * dpr}px Inter, system-ui, sans-serif`;
+    for (const target of targetsRef.current) {
+      const x = target.x * dpr;
+      const y = target.y * dpr;
+      const width = target.width * dpr;
+      const height = target.height * dpr;
+      ctx.strokeRect(x, y, width, height);
+
+      const label = target.label;
+      const labelWidth = ctx.measureText(label).width + 14 * dpr;
+      const labelHeight = 20 * dpr;
+      const labelY = Math.max(2 * dpr, y - labelHeight - 4 * dpr);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(47,217,244,0.92)';
+      ctx.fillRect(x, labelY, labelWidth, labelHeight);
+      ctx.fillStyle = '#001316';
+      ctx.fillText(label, x + 7 * dpr, labelY + 14 * dpr);
+      ctx.setLineDash([6 * dpr, 4 * dpr]);
+      ctx.fillStyle = TARGET_COLOR;
+    }
+    ctx.restore();
   }, []);
 
   // ── DPR-Aware Resize ────────────────────────────────────────────────────────
@@ -113,7 +149,9 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
   useEffect(() => {
     if (active) return;
     strokesRef.current = [];
+    targetsRef.current = [];
     drawingRef.current = null;
+    targetLabelRef.current = undefined;
     setHasInk(false);
     redraw();
   }, [active, redraw]);
@@ -127,7 +165,13 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
   }
 
   function onPointerDown(e: PointerEvent) {
-    if (mode !== 'draw' || sending) return;
+    if (sending) return;
+    if (mode === 'click') {
+      e.preventDefault();
+      handleTargetClick(e);
+      return;
+    }
+    if (mode !== 'draw') return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     drawingRef.current = { points: [pointFromEvent(e)] };
     redraw();
@@ -161,8 +205,37 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
 
   function clearInk() {
     strokesRef.current = [];
+    targetsRef.current = [];
     drawingRef.current = null;
+    targetLabelRef.current = undefined;
     setHasInk(false);
+    redraw();
+  }
+
+  function handleTargetClick(e: PointerEvent) {
+    const wrap = wrapRef.current;
+    const iframe = wrap?.querySelector('iframe');
+    const doc = iframe?.contentDocument;
+    if (!wrap || !iframe || !doc) return;
+
+    const iframeRect = iframe.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const xInFrame = e.clientX - iframeRect.left;
+    const yInFrame = e.clientY - iframeRect.top;
+    const el = doc.elementFromPoint(xInFrame, yInFrame) as HTMLElement | null;
+    if (!el) return;
+
+    const rect = el.getBoundingClientRect();
+    const label = formatTargetLabel(el);
+    targetsRef.current = [{
+      x: iframeRect.left - wrapRect.left + rect.left,
+      y: iframeRect.top - wrapRect.top + rect.top,
+      width: rect.width,
+      height: rect.height,
+      label,
+    }];
+    targetLabelRef.current = label;
+    setHasInk(true);
     redraw();
   }
 
@@ -191,6 +264,7 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
       dispatchAnnotation({
         imageDataUrl: imageDataUrl ?? '',
         note: note.trim(),
+        targetLabel: targetLabelRef.current,
         sourceName,
       });
       clearInk();
@@ -225,8 +299,8 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
           style={{
             position: 'absolute',
             inset: 0,
-            pointerEvents: active && mode === 'draw' ? 'auto' : 'none',
-            cursor: active && mode === 'draw' ? 'crosshair' : 'default',
+            pointerEvents: active && (mode === 'draw' || mode === 'click') ? 'auto' : 'none',
+            cursor: active && mode === 'draw' ? 'crosshair' : active && mode === 'click' ? 'cell' : 'default',
             zIndex: 10,
           }}
         />
@@ -393,3 +467,18 @@ const ghostBtnStyle: React.CSSProperties = {
   background: 'transparent',
   color: '#666',
 };
+
+function formatTargetLabel(el: HTMLElement): string {
+  const tag = el.tagName.toLowerCase();
+  const id = el.id ? `#${el.id}` : '';
+  const className = typeof el.className === 'string'
+    ? el.className
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(name => `.${name}`)
+      .join('')
+    : '';
+  return `${tag}${id}${className}` || tag;
+}

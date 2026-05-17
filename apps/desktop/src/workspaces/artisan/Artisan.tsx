@@ -15,7 +15,6 @@ import { ArtisanSandbox } from './ArtisanSandbox';
 import { ArtisanInspector } from './ArtisanInspector';
 import { useAiStore } from '../../core/store/useAiStore';
 import { SketchLayer } from './SketchLayer';
-import type { SketchItem } from '../../core/artisan/sketchTypes';
 
 // ── Layer Type Icons ─────────────────────────────────────────────────────────
 
@@ -125,6 +124,7 @@ const tools: { id: ArtisanTool; icon: string }[] = [
   { id: 'frame', icon: 'crop_free' },
   { id: 'text', icon: 'text_fields' },
   { id: 'pen', icon: 'history_edu' },
+  { id: 'sketch', icon: 'brush' },
   { id: 'ai', icon: 'auto_awesome' },
 ];
 
@@ -134,7 +134,7 @@ const CanvasToolbar: React.FC = () => {
     <div className="absolute top-md left-1/2 -translate-x-1/2 glass-panel rounded-full px-md py-sm flex items-center gap-md z-20">
       {tools.map((t, i) => (
         <React.Fragment key={t.id}>
-          {i === 4 && <div className="w-px h-4 bg-outline-variant" />}
+          {i === tools.length - 1 && <div className="w-px h-4 bg-outline-variant" />}
           <button
             onClick={() => setActiveTool(t.id)}
             className={`transition-colors ${activeTool === t.id ? 'text-secondary-fixed-dim' : 'text-outline hover:text-on-surface'}`}
@@ -148,29 +148,6 @@ const CanvasToolbar: React.FC = () => {
 };
 
 // ── Sketch Mode Toggle Badge ──────────────────────────────────────────────────
-
-interface SketchToolbarBadgeProps { sketchMode: boolean; onToggle: () => void; }
-const SketchToolbarBadge: React.FC<SketchToolbarBadgeProps> = ({ sketchMode, onToggle }) => (
-  <div className="absolute top-md right-md z-30">
-    <button
-      onClick={onToggle}
-      title={sketchMode ? 'Exit Sketch mode' : 'Open Sketch Layer'}
-      className="flex items-center gap-xs px-sm py-1 rounded-full text-[10px] font-bold tracking-widest transition-all border"
-      style={{
-        background: sketchMode ? 'rgba(47,217,244,0.15)' : 'rgba(255,255,255,0.04)',
-        borderColor: sketchMode ? 'rgba(47,217,244,0.4)' : 'rgba(255,255,255,0.1)',
-        color: sketchMode ? '#2fd9f4' : '#666',
-      }}
-    >
-      <span
-        className="material-symbols-outlined"
-        style={{ fontSize: 16, fontVariationSettings: sketchMode ? "'FILL' 1" : "'FILL' 0" }}
-      >brush</span>
-      {sketchMode ? 'SKETCH ON' : 'SKETCH'}
-    </button>
-  </div>
-);
-
 
 const RenderedLayer: React.FC<{ layer: ArtisanLayer }> = ({ layer }) => {
   const { selectedLayerId, hoveredLayerId, selectLayer, hoverLayer } = useArtisanStore();
@@ -472,9 +449,9 @@ const StyleInspector: React.FC = () => {
 export const Artisan: React.FC = () => {
   const [componentName, setComponentName] = useState<string | null>(null);
   const [code, setCode] = useState<string | null>(null);
-  const [sketchMode, setSketchMode] = useState(false);
-  const [sketchItems, setSketchItems] = useState<SketchItem[]>([]);
   const { isStreaming } = useAiStore();
+  const { activeTool, setActiveTool, sketchItems, setSketchItems } = useArtisanStore();
+  const sketchMode = activeTool === 'sketch';
 
   const handleStartGeneration = (name: string) => {
     setComponentName(name);
@@ -494,7 +471,7 @@ export const Artisan: React.FC = () => {
           <SketchLayer
             items={sketchItems}
             onItemsChange={setSketchItems}
-            onClose={() => setSketchMode(false)}
+            onClose={() => setActiveTool('select')}
           />
         ) : (
           <>
@@ -512,10 +489,6 @@ export const Artisan: React.FC = () => {
           </>
         )}
 
-        {/* Sketch mode toggle badge (only when not in sketch mode) */}
-        {!sketchMode && (
-          <SketchToolbarBadge sketchMode={sketchMode} onToggle={() => setSketchMode(true)} />
-        )}
       </div>
 
       {/* Right Panel */}

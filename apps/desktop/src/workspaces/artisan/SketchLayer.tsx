@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import type { SketchItem, SketchTool } from '../../core/artisan/sketchTypes';
 import { dispatchAnnotation } from '../../core/events/aetherDeskEvents';
+import { useWorkspaceStore } from '../../core/store/useWorkspaceStore';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,7 @@ interface Props {
 export const SketchLayer: React.FC<Props> = ({ items, onItemsChange, onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const { currentWorkspace } = useWorkspaceStore();
   const [tool, setTool] = useState<SketchTool>('pen');
   const [color, setColor] = useState('#2fd9f4');
   const [size, setSize] = useState(2);
@@ -92,7 +95,7 @@ export const SketchLayer: React.FC<Props> = ({ items, onItemsChange, onClose }) 
       return;
     }
 
-    const drawColor = tool === 'eraser' ? '#0f0f11' : color;
+    const drawColor = tool === 'eraser' ? '#ffffff' : color;
     const drawSize  = tool === 'eraser' ? size * 8 : size;
 
     if (tool === 'pen' || tool === 'eraser') {
@@ -145,20 +148,23 @@ export const SketchLayer: React.FC<Props> = ({ items, onItemsChange, onClose }) 
   async function handleSendToNexus() {
     const cvs = canvasRef.current;
     if (!cvs || items.length === 0) return;
-    const dataUrl = await new Promise<string | null>((resolve) => {
-      cvs.toBlob((blob) => {
-        if (!blob) return resolve(null);
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(blob);
-      }, 'image/png');
-    });
+    const dataUrl = await canvasToDataUrl(cvs);
     dispatchAnnotation({
       imageDataUrl: dataUrl ?? '',
       note: '',
       sourceName: 'Artisan Sketch',
     });
+  }
+
+  async function handleExportPng() {
+    const cvs = canvasRef.current;
+    if (!cvs || !currentWorkspace || items.length === 0) return;
+    const dataUrl = await canvasToDataUrl(cvs);
+    const base64 = dataUrl?.split(',')[1];
+    if (!base64) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = `${currentWorkspace.path}/.aether/sketches/sketch-${timestamp}.png`;
+    await invoke('fs_write_base64_file', { path, contentBase64: base64 });
   }
 
   return (
@@ -248,6 +254,22 @@ export const SketchLayer: React.FC<Props> = ({ items, onItemsChange, onClose }) 
         >
           <span className="material-symbols-outlined" style={{ fontSize: 14 }}>send</span>
           TO NEXUS
+        </button>
+
+        <button
+          onClick={() => void handleExportPng()}
+          disabled={items.length === 0 || !currentWorkspace}
+          title="Export sketch PNG to .aether/sketches"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+            borderRadius: 7, border: 'none', cursor: items.length > 0 && currentWorkspace ? 'pointer' : 'default',
+            fontWeight: 700, fontSize: 10, letterSpacing: '0.05em',
+            background: items.length > 0 && currentWorkspace ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
+            color: items.length > 0 && currentWorkspace ? '#e4e3f4' : '#444',
+          }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>download</span>
+          PNG
         </button>
 
         {/* Close sketch mode */}
@@ -345,13 +367,27 @@ function actionBtnStyle(_active: boolean): React.CSSProperties {
 
 function drawDotGrid(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.save();
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(15,15,17,0.16)';
   for (let y = 12; y < h; y += 16) {
     for (let x = 12; x < w; x += 16) {
       ctx.fillRect(x, y, 1.5, 1.5);
     }
   }
   ctx.restore();
+}
+
+function canvasToDataUrl(cvs: HTMLCanvasElement): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    cvs.toBlob((blob) => {
+      if (!blob) return resolve(null);
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    }, 'image/png');
+  });
 }
 
 function drawItem(ctx: CanvasRenderingContext2D, it: SketchItem) {

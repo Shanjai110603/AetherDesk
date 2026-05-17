@@ -33,5 +33,6 @@ tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-store = "2"
 notify = "8.2.0"
+base64 = "0.22"
 retrieval-engine = { path = "../../../services/semantic-engine/retrieval-engine" }
 symbol-graph = { path = "../../../services/semantic-engine/symbol-graph" }

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
+import type { SketchItem } from '../artisan/sketchTypes';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type LayerType = 'frame' | 'section' | 'text' | 'button' | 'image' | 'container' | 'input' | 'icon';
 export type ViewportMode = 'desktop' | 'tablet' | 'mobile';
-export type ArtisanTool = 'select' | 'frame' | 'text' | 'pen' | 'ai';
+export type ArtisanTool = 'select' | 'frame' | 'text' | 'pen' | 'sketch' | 'ai';
 export type InspectorTab = 'styles' | 'settings' | 'advanced';
 
 export interface LayerStyle {
@@ -163,6 +164,7 @@ interface ArtisanStoreState {
   activeTool: ArtisanTool;
   inspectorTab: InspectorTab;
   canvasZoom: number;
+  sketchItems: SketchItem[];
 
   // Actions
   selectLayer: (id: string | null) => void;
@@ -172,6 +174,8 @@ interface ArtisanStoreState {
   setViewport: (mode: ViewportMode) => void;
   setActiveTool: (tool: ArtisanTool) => void;
   setInspectorTab: (tab: InspectorTab) => void;
+  setSketchItems: (items: SketchItem[]) => void;
+  clearSketch: () => void;
   updateLayerStyle: (layerId: string, key: keyof LayerStyle, value: string) => void;
   updateLayerName: (layerId: string, name: string) => void;
   updateLayerContent: (layerId: string, content: string) => void;
@@ -207,6 +211,7 @@ export const useArtisanStore = create<ArtisanStoreState>((set) => ({
   activeTool: 'select',
   inspectorTab: 'styles',
   canvasZoom: 1,
+  sketchItems: [],
 
   selectLayer: (id) => set({ selectedLayerId: id }),
   hoverLayer: (id) => set({ hoveredLayerId: id }),
@@ -222,6 +227,8 @@ export const useArtisanStore = create<ArtisanStoreState>((set) => ({
   setViewport: (mode) => set({ viewport: mode }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setInspectorTab: (tab) => set({ inspectorTab: tab }),
+  setSketchItems: (items) => set({ sketchItems: items }),
+  clearSketch: () => set({ sketchItems: [] }),
 
   updateLayerStyle: (layerId, key, value) => set(state => ({
     layers: updateLayerInTree(state.layers, layerId, l => ({

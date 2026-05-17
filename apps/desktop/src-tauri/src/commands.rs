@@ -307,6 +307,21 @@ pub async fn fs_write_file(path: String, content: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub async fn fs_write_base64_file(path: String, content_base64: String) -> Result<(), String> {
+    if !is_path_safe(&path) { return Err("Path traversal detected".into()); }
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(content_base64)
+        .map_err(|e| format!("Failed to decode base64 content: {}", e))?;
+    let path_buf = PathBuf::from(&path);
+    if let Some(parent) = path_buf.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create parent directory for '{}': {}", path, e))?;
+    }
+    std::fs::write(&path_buf, bytes).map_err(|e| format!("Failed to write '{}': {}", path, e))
+}
+
+#[tauri::command]
 pub async fn execute_sandboxed_command(command: String) -> Result<String, String> {
     // Phase 11: Scope execution
     let parts: Vec<&str> = command.split_whitespace().collect();

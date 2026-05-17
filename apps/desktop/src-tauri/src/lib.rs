@@ -47,6 +47,7 @@ pub fn run() {
             commands::fs_read_dir,
             commands::fs_read_file,
             commands::fs_write_file,
+            commands::fs_write_base64_file,
             commands::execute_sandboxed_command,
             // Runtime
             commands::runtime_start,
