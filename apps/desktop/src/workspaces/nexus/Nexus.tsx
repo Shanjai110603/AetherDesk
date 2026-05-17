@@ -1,10 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { NexusSlashPalette } from './NexusSlashPalette';
+import { NexusMentionPalette } from './NexusMentionPalette';
+import { NEXUS_SLASH_COMMANDS, type SlashCommand } from './nexusCommands';
 import { useAiStore } from '../../core/store/useAiStore';
 import type { AIChatMessage } from '../../core/store/useAiStore';
 import { useAiStream } from '../../core/hooks/useAiStream';
 import { invoke } from '@tauri-apps/api/core';
 import { onAnnotation, type AnnotationEventDetail } from '../../core/events/aetherDeskEvents';
+import { useFilesystemStore, type FileNode } from '../../core/store/useFilesystemStore';
+import { useSwarmStore } from '../../core/store/useSwarmStore';
+
+interface StagedFileContext {
+  path: string;
+  name: string;
+  content: string;
+}
+
+function flattenFiles(nodes: FileNode[]): FileNode[] {
+  return nodes.flatMap(node => node.is_dir ? flattenFiles(node.children ?? []) : [node]);
+}
 
 // ── Message Bubble ────────────────────────────────────────────────────────────
 const MessageBubble: React.FC<{ msg: AIChatMessage; isStreaming: boolean; isLast: boolean }> = ({ msg, isStreaming, isLast }) => {
@@ -80,12 +94,45 @@ const MessageBubble: React.FC<{ msg: AIChatMessage; isStreaming: boolean; isLast
 };
 
 // ── Nexus ─────────────────────────────────────────────────────────────────────
+const ContextChip: React.FC<{ icon: string; color: string; label: string; onRemove: () => void }> = ({
+  icon,
+  color,
+  label,
+  onRemove,
+}) => (
+  <div style={{
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '5px 8px',
+    maxWidth: 280,
+    background: `${color}14`,
+    border: `1px solid ${color}40`,
+    borderRadius: 8,
+  }}>
+    <span className="material-symbols-outlined" style={{ fontSize: 14, color, fontVariationSettings: "'FILL' 1" }}>{icon}</span>
+    <span style={{ fontSize: 11, fontWeight: 600, color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    <button
+      onClick={onRemove}
+      style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
+      title="Remove context"
+    >
+      <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+    </button>
+  </div>
+);
+
 export const Nexus: React.FC = () => {
   const { models, activeModelId, sessions, activeSessionId, isStreaming, lastTelemetry, newSession } = useAiStore();
   const { sendMessage } = useAiStream();
+  const { fileTree } = useFilesystemStore();
+  const { personas } = useSwarmStore();
   const [input, setInput] = useState('');
   const [slashMode, setSlashMode] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
+  const [mentionMode, setMentionMode] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [stagedFiles, setStagedFiles] = useState<StagedFileContext[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [temperature, setTemperature] = useState(0.7);
   const [showTempSlider, setShowTempSlider] = useState(false);
@@ -94,6 +141,8 @@ export const Nexus: React.FC = () => {
   const activeModel = models.find(m => m.id === activeModelId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const sessionList = Object.values(sessions).sort((a, b) => b.updatedAt - a.updatedAt);
+  const flatFiles = flattenFiles(fileTree);
+  const slashCommands = NEXUS_SLASH_COMMANDS;
 
   // ── Staged Annotation (from Forge Preview) ────────────────────────────────
   const [stagedAnnotation, setStagedAnnotation] = useState<AnnotationEventDetail | null>(null);
@@ -110,12 +159,20 @@ export const Nexus: React.FC = () => {
       setSlashMode(false);
       return;
     }
-    const slashMatch = input.match(/^\/([\w]*)$/);
+    const slashMatch = input.match(/(?:^|\s)\/([\w]*)$/);
     if (slashMatch) {
       setSlashMode(true);
       setSlashQuery(slashMatch[1] ?? '');
     } else {
       setSlashMode(false);
+    }
+
+    const mentionMatch = input.match(/(?:^|\s)@([\w.\-]*)$/);
+    if (mentionMatch) {
+      setMentionMode(true);
+      setMentionQuery(mentionMatch[1] ?? '');
+    } else {
+      setMentionMode(false);
     }
   }, [input, isStreaming]);
 
@@ -131,16 +188,109 @@ export const Nexus: React.FC = () => {
     }
   }, [isStreaming]);
 
+  const clearActiveSession = () => {
+    if (!activeSessionId) return;
+    useAiStore.setState(state => ({
+      sessions: {
+        ...state.sessions,
+        [activeSessionId]: {
+          ...state.sessions[activeSessionId],
+          messages: [],
+          title: 'New Session',
+          updatedAt: Date.now(),
+        },
+      },
+    }));
+  };
+
+  const attachFile = async (file: FileNode) => {
+    if (file.is_dir) return;
+    try {
+      const content = await invoke<string>('fs_read_file', { path: file.path });
+      setStagedFiles(prev => prev.some(item => item.path === file.path) ? prev : [...prev, { path: file.path, name: file.name, content }]);
+      setInput(prev => prev.replace(/(?:^|\s)@[\w.\-]*$/, match => match.startsWith(' ') ? ' ' : ''));
+      setMentionMode(false);
+    } catch (e) {
+      console.error('Failed to attach file:', e);
+    }
+  };
+
+  const handleSlashCommand = async (cmd: SlashCommand, arg: string): Promise<boolean> => {
+    if (cmd.id === 'clear') {
+      clearActiveSession();
+      setInput('');
+      return true;
+    }
+    if (cmd.id === 'model') {
+      setModelDropdownOpen(true);
+      setInput('');
+      return true;
+    }
+    if (cmd.id === 'search') {
+      setInput(arg ? `Research this and synthesize actionable context:\n${arg}` : 'Research this and synthesize actionable context:\n');
+      return true;
+    }
+    if (cmd.id === 'agent') {
+      const [agentId, ...rest] = arg.split(/\s+/).filter(Boolean);
+      const persona = personas.find(p => p.id === agentId || p.name.toLowerCase() === agentId?.toLowerCase());
+      if (!persona) return false;
+      setInput(`Delegate to ${persona.name} (${persona.role}):\n${rest.join(' ')}`);
+      return false;
+    }
+    if (cmd.id === 'read') {
+      const target = flatFiles.find(file => file.path === arg || file.name === arg || file.path.endsWith(arg));
+      if (target) await attachFile(target);
+      setInput('');
+      return true;
+    }
+    if (cmd.id === 'run') {
+      if (!arg.trim()) return false;
+      try {
+        const output = await invoke<string>('execute_sandboxed_command', { command: arg.trim() });
+        setStagedFiles(prev => [...prev, { path: `terminal:${arg.trim()}`, name: `run: ${arg.trim()}`, content: output || '(no output)' }]);
+        setInput('');
+      } catch (e) {
+        setStagedFiles(prev => [...prev, { path: `terminal:${arg.trim()}`, name: `run failed: ${arg.trim()}`, content: String(e) }]);
+        setInput('');
+      }
+      return true;
+    }
+    return false;
+  };
+
   const handleExecute = async () => {
-    if (!input.trim() && !stagedAnnotation || isStreaming || !activeSessionId || !activeModelId || !activeModel) return;
+    if ((!input.trim() && !stagedAnnotation && stagedFiles.length === 0) || isStreaming || !activeSessionId || !activeModelId || !activeModel) return;
     let text = input.trim();
+
+    const commandMatch = text.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
+    if (commandMatch) {
+      const cmd = slashCommands.find(item => item.id === commandMatch[1]);
+      if (cmd && await handleSlashCommand(cmd, commandMatch[2] ?? '')) return;
+      text = input.trim();
+    }
+
+    if (stagedFiles.length > 0) {
+      const fileBlock = stagedFiles.map(file => [
+        `<details><summary>${file.name}</summary>`,
+        '',
+        `Path: ${file.path}`,
+        '```',
+        file.content.slice(0, 20000),
+        '```',
+        '</details>',
+      ].join('\n')).join('\n\n');
+      text = `${text}\n\n=== ATTACHED FILE CONTEXT ===\n${fileBlock}`.trim();
+      setStagedFiles([]);
+    }
+
     // Prepend annotation context if staged
     if (stagedAnnotation) {
       const annotationBlock = [
-        `[Visual Annotation from ${stagedAnnotation.sourceName ?? 'Preview'}]`,
+        `[Visual Annotation Attached from ${stagedAnnotation.sourceName ?? 'Preview'}]`,
+        stagedAnnotation.targetLabel ? `Target: ${stagedAnnotation.targetLabel}` : '',
         stagedAnnotation.note ? `Note: ${stagedAnnotation.note}` : '',
         stagedAnnotation.imageDataUrl
-          ? `![Annotation](${stagedAnnotation.imageDataUrl})`
+          ? `\`\`\`image-data-url\n${stagedAnnotation.imageDataUrl}\n\`\`\``
           : '',
       ].filter(Boolean).join('\n');
       text = annotationBlock + (text ? '\n\n' + text : '');
@@ -308,6 +458,19 @@ export const Nexus: React.FC = () => {
               </button>
             </div>
           )}
+          {stagedFiles.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {stagedFiles.map(file => (
+                <ContextChip
+                  key={file.path}
+                  icon={file.path.startsWith('terminal:') ? 'terminal' : 'description'}
+                  color={file.path.startsWith('terminal:') ? '#4ade80' : '#ff9500'}
+                  label={file.name}
+                  onRemove={() => setStagedFiles(prev => prev.filter(item => item.path !== file.path))}
+                />
+              ))}
+            </div>
+          )}
           <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
             <textarea
               style={{ width: '100%', background: 'transparent', border: 'none', padding: '12px 16px 8px', resize: 'none', height: 80, fontSize: 14, color: '#e4e3f4', outline: 'none', boxSizing: 'border-box', lineHeight: 1.5 }}
@@ -322,12 +485,20 @@ export const Nexus: React.FC = () => {
                 {slashMode ? (
                   <NexusSlashPalette
                     query={slashQuery}
+                    commands={slashCommands}
                     onSelect={(cmd) => {
                       // Insert command text and close palette
-                      setInput(prev => prev.replace(/^\/.*$/, cmd.insert));
+                      setInput(prev => prev.replace(/(?:^|\s)\/[\w]*$/, match => match.startsWith(' ') ? ` ${cmd.insert}` : cmd.insert));
                       setSlashMode(false);
                     }}
                     onClose={() => setSlashMode(false)}
+                  />
+                ) : mentionMode ? (
+                  <NexusMentionPalette
+                    query={mentionQuery}
+                    files={flatFiles}
+                    onSelect={(file) => void attachFile(file)}
+                    onClose={() => setMentionMode(false)}
                   />
                 ) : (
                   [{ icon: 'attach_file', tip: 'Attach' }, { icon: 'search', tip: 'Search' }, { icon: 'smart_toy', tip: 'Agent' }].map(b => (
@@ -359,8 +530,8 @@ export const Nexus: React.FC = () => {
               </div>
               <button
                 onClick={isStreaming ? () => useAiStore.setState({ isStreaming: false }) : handleExecute}
-                disabled={slashMode}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 8, border: 'none', cursor: input.trim() && !slashMode && !isStreaming ? 'pointer' : 'default', fontWeight: 700, fontSize: 11, background: isStreaming ? '#b00020' : input.trim() && !slashMode ? '#2fd9f4' : 'rgba(255,255,255,0.08)', color: isStreaming || (input.trim() && !slashMode) ? '#000' : '#666', transition: 'all 0.15s', letterSpacing: '0.05em' }}
+                disabled={slashMode || mentionMode}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 8, border: 'none', cursor: (input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode && !isStreaming ? 'pointer' : 'default', fontWeight: 700, fontSize: 11, background: isStreaming ? '#b00020' : (input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode ? '#2fd9f4' : 'rgba(255,255,255,0.08)', color: isStreaming || ((input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode) ? '#000' : '#666', transition: 'all 0.15s', letterSpacing: '0.05em' }}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{isStreaming ? 'stop' : 'send'}</span>
                 {isStreaming ? 'STOP' : 'EXECUTE'}
