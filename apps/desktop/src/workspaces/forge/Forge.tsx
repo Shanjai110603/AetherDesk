@@ -73,6 +73,8 @@ export const Forge: React.FC = () => {
   const { status, logs, previewUrl, startRuntime, stopRuntime, addLog, sessionId } = useRuntimeStore();
   const { currentWorkspace, setCurrentWorkspace } = useWorkspaceStore();
   const editorRef = useRef<any>(null);
+  const tabBarRef = useRef<HTMLDivElement | null>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
 
   const [rightTab, setRightTab] = useState<RightPanelTab>('preview');
   const [aiActionActive, setAiActionActive] = useState<string | null>(null);
@@ -177,6 +179,16 @@ export const Forge: React.FC = () => {
       console.error('Open folder failed:', err);
     }
   }, [loadDirectory, setCurrentWorkspace]);
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!overflowOpen) return;
+      if (tabBarRef.current && !tabBarRef.current.contains(event.target as Node)) {
+        setOverflowOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [overflowOpen]);
 
   const handleStartRuntime = useCallback(async () => {
     if (!currentWorkspace) return;
@@ -268,7 +280,7 @@ export const Forge: React.FC = () => {
           {/* ── CENTER: Monaco Editor ──────────────────────────────── */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0e0e10' }}>
             {/* Tab bar */}
-            <div className="flex bg-surface-container-low h-9 border-b border-outline-variant flex-shrink-0 overflow-x-auto">
+            <div ref={tabBarRef} className="flex bg-surface-container-low h-9 border-b border-outline-variant flex-shrink-0 overflow-x-auto">
               {openTabs.map(tab => (
                 <button
                   key={tab.id}

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { SketchItem, SketchTool } from '../../core/artisan/sketchTypes';
 import { dispatchAnnotation } from '../../core/events/aetherDeskEvents';
 import { useWorkspaceStore } from '../../core/store/useWorkspaceStore';
+import { useDpiCanvas } from '../../core/hooks/useDpiCanvas';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -56,24 +57,7 @@ export const SketchLayer: React.FC<Props> = ({ items, onItemsChange, onClose }) 
     for (const it of all) drawItem(ctx, it);
   }, [items]);
 
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    const cvs = canvasRef.current;
-    if (!wrap || !cvs) return;
-    const dpr = window.devicePixelRatio || 1;
-    const ro = new ResizeObserver(() => {
-      const rect = wrap.getBoundingClientRect();
-      cvs.width = Math.max(1, Math.round(rect.width * dpr));
-      cvs.height = Math.max(1, Math.round(rect.height * dpr));
-      cvs.style.width = `${rect.width}px`;
-      cvs.style.height = `${rect.height}px`;
-      const ctx = cvs.getContext('2d');
-      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      redraw();
-    });
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [redraw]);
+  useDpiCanvas(canvasRef, wrapRef, redraw);
 
   useEffect(() => { redraw(); }, [redraw]);
 

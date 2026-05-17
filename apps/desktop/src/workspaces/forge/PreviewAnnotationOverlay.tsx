@@ -7,6 +7,7 @@ import React, {
   type WheelEvent,
 } from 'react';
 import { dispatchAnnotation } from '../../core/events/aetherDeskEvents';
+import { useDpiCanvas } from '../../core/hooks/useDpiCanvas';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -117,24 +118,7 @@ export const PreviewAnnotationOverlay: React.FC<Props> = ({
 
   // ── DPR-Aware Resize ────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    const cvs = canvasRef.current;
-    if (!wrap || !cvs) return;
-    const resize = () => {
-      const rect = wrap.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      cvs.width = Math.max(1, Math.floor(rect.width * dpr));
-      cvs.height = Math.max(1, Math.floor(rect.height * dpr));
-      cvs.style.width = `${rect.width}px`;
-      cvs.style.height = `${rect.height}px`;
-      redraw();
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [redraw]);
+  useDpiCanvas(canvasRef, wrapRef, redraw);
 
   // Escape key deactivates overlay
   useEffect(() => {
