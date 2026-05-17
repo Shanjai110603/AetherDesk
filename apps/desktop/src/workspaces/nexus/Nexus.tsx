@@ -1,0 +1,447 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { NexusSlashPalette } from './NexusSlashPalette';
+import { useAiStore } from '../../core/store/useAiStore';
+import type { AIChatMessage } from '../../core/store/useAiStore';
+import { useAiStream } from '../../core/hooks/useAiStream';
+import { invoke } from '@tauri-apps/api/core';
+import { onAnnotation, type AnnotationEventDetail } from '../../core/events/aetherDeskEvents';
+
+// ── Message Bubble ────────────────────────────────────────────────────────────
+const MessageBubble: React.FC<{ msg: AIChatMessage; isStreaming: boolean; isLast: boolean }> = ({ msg, isStreaming, isLast }) => {
+  if (msg.role === 'user') {
+    // We strip the hidden semantic context from the UI display
+    const displayContent = msg.content.split('\n\n=== WORKSPACE SEMANTIC CONTEXT ===')[0];
+    
+    return (
+      <div className="flex flex-col items-end gap-xs">
+        <div style={{ maxWidth: '80%' }} className="bg-surface-container-highest rounded-2xl rounded-tr-sm p-3 border border-outline-variant/40">
+          <p className="text-[14px] text-on-surface whitespace-pre-wrap leading-relaxed">{displayContent}</p>
+        </div>
+        {msg.contextSymbols && msg.contextSymbols.length > 0 && (
+          <div className="flex flex-col gap-1 items-end mt-1 max-w-[80%]">
+            <span className="text-[10px] text-secondary font-bold uppercase tracking-widest flex items-center gap-1">
+              <span className="material-symbols-outlined text-[12px]">account_tree</span>
+              Workspace Context Attached
+            </span>
+            <div className="flex flex-wrap gap-1 justify-end">
+              {msg.contextSymbols.map((sym, idx) => (
+                <div key={idx} className="flex items-center gap-1 bg-surface-container-low border border-outline-variant/30 rounded px-2 py-1" title={sym.file_path}>
+                  <span className="material-symbols-outlined text-[12px] text-outline">
+                    {sym.kind.toLowerCase() === 'function' ? 'function' : sym.kind.toLowerCase() === 'class' ? 'data_object' : 'code'}
+                  </span>
+                  <span className="text-[10px] text-outline-variant font-mono">{sym.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  const showCursor = isStreaming && isLast && msg.role === 'assistant';
+  const parts = msg.content.split(/(```[\s\S]*?```)/g);
+  return (
+    <div className="flex gap-2">
+      <div className="w-7 h-7 rounded-lg bg-secondary/20 border border-secondary/30 flex items-center justify-center flex-shrink-0 mt-1">
+        <span className="material-symbols-outlined text-secondary text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>smart_toy</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }} className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-secondary-fixed-dim tracking-widest">AETHER CORE</span>
+          {showCursor && <span className="text-[10px] text-secondary animate-pulse">STREAMING…</span>}
+        </div>
+        <div className="bg-surface-container-low border border-outline-variant/50 rounded-xl rounded-tl-sm p-3 flex flex-col gap-3">
+          {parts.map((part, i) => {
+            if (part.startsWith('```')) {
+              const lines = part.slice(3, -3).split('\n');
+              const lang = lines[0]?.trim() || '';
+              const code = lines.slice(lang ? 1 : 0).join('\n');
+              return (
+                <div key={i} className="bg-surface-container-highest rounded-lg border border-outline-variant/40 overflow-hidden">
+                  <div className="bg-surface-container-low px-3 py-1 border-b border-outline-variant/40 flex justify-between items-center">
+                    <span className="text-[10px] text-outline font-mono">{lang || 'code'}</span>
+                    <button className="flex items-center gap-1 text-outline hover:text-on-surface transition-colors" onClick={() => navigator.clipboard.writeText(code)}>
+                      <span className="material-symbols-outlined text-[14px]">content_copy</span>
+                      <span className="text-[10px]">Copy</span>
+                    </button>
+                  </div>
+                  <pre className="p-3 text-secondary-fixed-dim font-mono text-[13px] overflow-x-auto leading-relaxed"><code>{code}</code></pre>
+                </div>
+              );
+            }
+            if (!part.trim()) return null;
+            return <p key={i} className="text-[14px] leading-relaxed text-on-surface whitespace-pre-wrap">{part}</p>;
+          })}
+          {showCursor && <span className="inline-block w-2 h-4 bg-secondary animate-pulse rounded-sm" />}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Nexus ─────────────────────────────────────────────────────────────────────
+export const Nexus: React.FC = () => {
+  const { models, activeModelId, sessions, activeSessionId, isStreaming, lastTelemetry, newSession } = useAiStore();
+  const { sendMessage } = useAiStream();
+  const [input, setInput] = useState('');
+  const [slashMode, setSlashMode] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [temperature, setTemperature] = useState(0.7);
+  const [showTempSlider, setShowTempSlider] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const activeModel = models.find(m => m.id === activeModelId);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const sessionList = Object.values(sessions).sort((a, b) => b.updatedAt - a.updatedAt);
+
+  // ── Staged Annotation (from Forge Preview) ────────────────────────────────
+  const [stagedAnnotation, setStagedAnnotation] = useState<AnnotationEventDetail | null>(null);
+
+  useEffect(() => {
+    return onAnnotation((detail) => {
+      setStagedAnnotation(detail);
+    });
+  }, []);
+
+  // Detect slash trigger in input
+  useEffect(() => {
+    if (isStreaming) {
+      setSlashMode(false);
+      return;
+    }
+    const slashMatch = input.match(/^\/([\w]*)$/);
+    if (slashMatch) {
+      setSlashMode(true);
+      setSlashQuery(slashMatch[1] ?? '');
+    } else {
+      setSlashMode(false);
+    }
+  }, [input, isStreaming]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeSession?.messages.length, activeSession?.messages[activeSession?.messages.length - 1]?.content]);
+
+  useEffect(() => {
+    const pendingPrompt = sessionStorage.getItem('nexus_prompt');
+    if (pendingPrompt && !isStreaming) {
+      sessionStorage.removeItem('nexus_prompt');
+      setInput(pendingPrompt);
+    }
+  }, [isStreaming]);
+
+  const handleExecute = async () => {
+    if (!input.trim() && !stagedAnnotation || isStreaming || !activeSessionId || !activeModelId || !activeModel) return;
+    let text = input.trim();
+    // Prepend annotation context if staged
+    if (stagedAnnotation) {
+      const annotationBlock = [
+        `[Visual Annotation from ${stagedAnnotation.sourceName ?? 'Preview'}]`,
+        stagedAnnotation.note ? `Note: ${stagedAnnotation.note}` : '',
+        stagedAnnotation.imageDataUrl
+          ? `![Annotation](${stagedAnnotation.imageDataUrl})`
+          : '',
+      ].filter(Boolean).join('\n');
+      text = annotationBlock + (text ? '\n\n' + text : '');
+      setStagedAnnotation(null);
+    }
+    if (!text) return;
+    setInput('');
+    await sendMessage(activeSessionId, text, activeModelId, activeModel.providerId);
+  };
+
+  return (
+    // Root: full width + height, horizontal flex — NO react-resizable-panels
+    <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', background: '#0f0f11' }}>
+
+      {/* ── LEFT: Sessions sidebar ── fixed 220px */}
+      <div style={{ width: 220, minWidth: 220, maxWidth: 220, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', flexShrink: 0 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#908fa0', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Sessions</span>
+          <button
+            onClick={newSession}
+            style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: 'transparent', border: 'none', color: '#908fa0', cursor: 'pointer' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            title="New Session"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>add</span>
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {sessionList.length === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 16, opacity: 0.4, textAlign: 'center' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#908fa0', marginBottom: 8 }}>chat_bubble</span>
+              <p style={{ fontSize: 11, color: '#908fa0' }}>No sessions yet</p>
+              <p style={{ fontSize: 10, color: '#666', marginTop: 4 }}>Click + to start</p>
+            </div>
+          )}
+          {sessionList.map(s => {
+            const isActive = s.id === activeSessionId;
+            return (
+              <button
+                key={s.id}
+                onClick={() => useAiStore.getState().setActiveSession(s.id)}
+                style={{
+                  padding: '8px 10px', borderRadius: 8, textAlign: 'left', cursor: 'pointer', width: '100%', border: 'none',
+                  background: isActive ? 'rgba(47, 217, 244, 0.1)' : 'transparent',
+                  outline: isActive ? '1px solid rgba(47,217,244,0.2)' : '1px solid transparent',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <p style={{ fontSize: 12, fontWeight: 600, color: isActive ? '#2fd9f4' : '#c4c3d4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>{s.title}</p>
+                <p style={{ fontSize: 10, color: '#666', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.messages.length > 0 ? `${s.messages.length} messages` : 'Empty'}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── CENTER: Chat ── flex-1 */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        {/* Grid background */}
+        <div className="technical-grid" style={{ position: 'absolute', inset: 0, opacity: 0.5, pointerEvents: 'none' }} />
+
+        {/* Model bar */}
+        <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)', flexShrink: 0, position: 'relative', zIndex: 10 }}>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setModelDropdownOpen(o => !o)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#e4e3f4' }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 15, color: '#2fd9f4', fontVariationSettings: "'FILL' 1" }}>bolt</span>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{activeModel?.name || 'Select Model'}</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#666' }}>expand_more</span>
+            </button>
+            {modelDropdownOpen && (
+              <div style={{ position: 'absolute', top: '100%', marginTop: 4, left: 0, width: 240, background: '#1a1a1f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.5)', zIndex: 100, overflow: 'hidden' }}>
+                {models.map(m => (
+                  <button key={m.id} onClick={() => { useAiStore.getState().setActiveModel(m.id); setModelDropdownOpen(false); }}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: m.id === activeModelId ? 'rgba(47,217,244,0.08)' : 'transparent', border: 'none', cursor: 'pointer', color: '#c4c3d4', textAlign: 'left' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+                    onMouseLeave={e => e.currentTarget.style.background = m.id === activeModelId ? 'rgba(47,217,244,0.08)' : 'transparent'}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 15, color: '#2fd9f4' }}>{m.providerId === 'ollama' || m.providerId === 'local' ? 'memory' : 'cloud'}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
+                      <div style={{ fontSize: 10, color: '#666' }}>{m.providerId}</div>
+                    </div>
+                    {m.id === activeModelId && <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#2fd9f4' }}>check</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {isStreaming && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2fd9f4', animation: 'pulse 1s infinite' }} />
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#2fd9f4', letterSpacing: '0.1em' }}>STREAMING</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#666', position: 'relative' }}>
+            <button
+              onClick={() => setShowTempSlider(s => !s)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#908fa0', fontSize: 11, fontWeight: 600 }}
+            >
+              TEMP: {temperature.toFixed(1)}
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>tune</span>
+            </button>
+            {showTempSlider && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: '#1a1a1f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '12px 16px', zIndex: 100, width: 200, boxShadow: '0 16px 40px rgba(0,0,0,0.5)' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#908fa0', letterSpacing: '0.1em', marginBottom: 8 }}>TEMPERATURE</div>
+                <input
+                  type="range" min="0" max="2" step="0.1"
+                  value={temperature}
+                  onChange={e => setTemperature(parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: '#2fd9f4' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#666', marginTop: 4 }}>
+                  <span>Precise</span><span>Creative</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, position: 'relative', zIndex: 10 }}
+          onClick={() => setModelDropdownOpen(false)}>
+          {(!activeSession || activeSession.messages.length === 0) && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, textAlign: 'center', opacity: 0.4 }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 56, color: '#908fa0', marginBottom: 16, fontVariationSettings: "'FILL' 1" }}>smart_toy</span>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#c4c3d4', margin: '0 0 4px' }}>AetherDesk Intelligence</h2>
+              <p style={{ fontSize: 13, color: '#666' }}>Describe what you want to build, automate, or explore.</p>
+            </div>
+          )}
+          {activeSession?.messages.map((msg, i) => (
+            <MessageBubble key={msg.id} msg={msg} isStreaming={isStreaming} isLast={i === activeSession.messages.length - 1} />
+          ))}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input */}
+        <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', borderTop: '1px solid rgba(255,255,255,0.06)', flexShrink: 0, position: 'relative', zIndex: 10 }}>
+
+          {/* Staged Annotation Chip */}
+          {stagedAnnotation && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', marginBottom: 8,
+              background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.25)',
+              borderRadius: 8,
+            }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#ff3b30', fontVariationSettings: "'FILL' 1" }}>draw</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#ff3b30', flex: 1 }}>
+                Annotation from {stagedAnnotation.sourceName ?? 'Preview'}
+                {stagedAnnotation.note ? ` — "${stagedAnnotation.note}"` : ''}
+              </span>
+              <button
+                onClick={() => setStagedAnnotation(null)}
+                style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                title="Remove annotation"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+              </button>
+            </div>
+          )}
+          <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+            <textarea
+              style={{ width: '100%', background: 'transparent', border: 'none', padding: '12px 16px 8px', resize: 'none', height: 80, fontSize: 14, color: '#e4e3f4', outline: 'none', boxSizing: 'border-box', lineHeight: 1.5 }}
+              placeholder="Message The Nexus… (Enter to send, Shift+Enter for newline)"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleExecute(); } }}
+              disabled={isStreaming}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 12px 8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {slashMode ? (
+                  <NexusSlashPalette
+                    query={slashQuery}
+                    onSelect={(cmd) => {
+                      // Insert command text and close palette
+                      setInput(prev => prev.replace(/^\/.*$/, cmd.insert));
+                      setSlashMode(false);
+                    }}
+                    onClose={() => setSlashMode(false)}
+                  />
+                ) : (
+                  [{ icon: 'attach_file', tip: 'Attach' }, { icon: 'search', tip: 'Search' }, { icon: 'smart_toy', tip: 'Agent' }].map(b => (
+                    <button key={b.icon} title={b.tip}
+                      onClick={async () => {
+                        if (b.tip === 'Search') setInput(prev => prev + '/search ');
+                        else if (b.tip === 'Agent') setInput(prev => prev + '@agent ');
+                        else if (b.tip === 'Attach') {
+                          try {
+                            const { open } = await import('@tauri-apps/plugin-dialog');
+                            const selected = await open({ multiple: false });
+                            if (selected && typeof selected === 'string') {
+                              const content = await invoke<string>('fs_read_file', { path: selected });
+                              setInput(prev => prev + `\n\nFile attached: ${selected}\n\`\`\`\n${content}\n\`\`\`\n`);
+                            }
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        }
+                      }}
+                      style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: 'none', background: 'transparent', color: '#666', cursor: 'pointer' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = '#2fd9f4'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#666'; }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{b.icon}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <button
+                onClick={isStreaming ? () => useAiStore.setState({ isStreaming: false }) : handleExecute}
+                disabled={slashMode}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 8, border: 'none', cursor: input.trim() && !slashMode && !isStreaming ? 'pointer' : 'default', fontWeight: 700, fontSize: 11, background: isStreaming ? '#b00020' : input.trim() && !slashMode ? '#2fd9f4' : 'rgba(255,255,255,0.08)', color: isStreaming || (input.trim() && !slashMode) ? '#000' : '#666', transition: 'all 0.15s', letterSpacing: '0.05em' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{isStreaming ? 'stop' : 'send'}</span>
+                {isStreaming ? 'STOP' : 'EXECUTE'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── RIGHT: Context panel ── fixed 260px */}
+      <div style={{ width: 260, minWidth: 260, maxWidth: 260, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderLeft: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', flexShrink: 0 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#908fa0', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Active Context</span>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Telemetry */}
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>TELEMETRY</p>
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+              {[
+                { label: 'Inference', value: lastTelemetry ? `${lastTelemetry.inference_ms}ms` : '—', color: '#2fd9f4' },
+                { label: 'Tokens/sec', value: lastTelemetry ? lastTelemetry.tokens_per_sec.toFixed(1) : '—', color: '#e4e3f4' },
+                { label: 'Provider', value: activeModel?.providerId || '—', color: '#c4c3d4' },
+                { label: 'Status', value: isStreaming ? 'STREAMING' : 'IDLE', color: isStreaming ? '#2fd9f4' : '#666' },
+              ].map((item, i) => (
+                <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 12px', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                  <span style={{ fontSize: 11, color: '#666' }}>{item.label}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {item.label === 'Status' && <span style={{ width: 6, height: 6, borderRadius: '50%', background: isStreaming ? '#2fd9f4' : '#444' }} />}
+                    <span style={{ fontSize: 11, fontWeight: 700, color: item.color }}>{item.value}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Session */}
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>SESSION</p>
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+              {[
+                { label: 'Messages', value: String(activeSession?.messages.length ?? 0), color: '#e4e3f4' },
+                { label: 'Model', value: activeModel?.name ?? '—', color: '#2fd9f4' },
+              ].map((item, i) => (
+                <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 12px', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                  <span style={{ fontSize: 11, color: '#666' }}>{item.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: item.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* AI Utilities */}
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>AI UTILITIES</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {[{ icon: 'analytics', label: 'Analyze' }, { icon: 'auto_stories', label: 'Summarize' }, { icon: 'terminal', label: 'Shell' }, { icon: 'search_check', label: 'Fact Check' }].map(({ icon, label }) => (
+                <button key={label}
+                  onClick={() => {
+                    const prompts: Record<string, string> = {
+                      'Analyze': 'Please analyze the current project context and identify areas for improvement.',
+                      'Summarize': 'Summarize the current file or workspace context.',
+                      'Shell': 'Write a shell script to automate my current task.',
+                      'Fact Check': 'Fact check this statement: ',
+                    };
+                    setInput(prompts[label] || '');
+                  }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 8, background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', cursor: 'pointer', transition: 'all 0.15s' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(47,217,244,0.08)'; e.currentTarget.style.borderColor = 'rgba(47,217,244,0.2)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'; }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18, color: '#2fd9f4' }}>{icon}</span>
+                  <span style={{ fontSize: 10, color: '#c4c3d4', fontWeight: 500 }}>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+};

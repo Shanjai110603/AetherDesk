@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-ssr/
+target/
+
+.analysis-temp/
+.refact/
+temp_analysis_open_design/
+.temp-analysis/
+
+*.log
+*.local
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

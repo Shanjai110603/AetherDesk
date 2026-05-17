@@ -1,0 +1,13 @@
+[package]
+name = "ast-indexer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tree-sitter = "0.22"
+tree-sitter-typescript = "0.21"
+tree-sitter-rust = "0.21"
+tree-sitter-python = "0.21"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

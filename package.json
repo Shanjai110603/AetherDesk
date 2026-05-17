@@ -1,0 +1,9 @@
+{
+  "name": "aetherdesk-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ]
+}

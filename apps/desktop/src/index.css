@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: theme('colors.background');
+    color: theme('colors.on-surface');
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  
+  .glass-panel {
+    backdrop-filter: blur(8px);
+    background: rgba(20, 20, 22, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  
+  .technical-grid {
+    background-image: 
+      linear-gradient(rgba(144, 143, 160, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(144, 143, 160, 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar { 
+    display: none; 
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: theme('colors.outline-variant'); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: theme('colors.outline'); }
+
+/* ── Loom Live Telemetry Animations ──────────────────────────────────────── */
+
+@keyframes nodePulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(47, 217, 244, 0.2); }
+  50% { box-shadow: 0 0 28px rgba(47, 217, 244, 0.45); }
+}
+
+@keyframes edgeFlow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes timelineProgress {
+  from { width: 0%; }
+  to { width: 100%; }
+}

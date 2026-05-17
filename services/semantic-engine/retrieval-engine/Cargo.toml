@@ -1,0 +1,11 @@
+[package]
+name = "retrieval-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+symbol-graph = { path = "../symbol-graph" }
+ast-indexer = { path = "../ast-indexer" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
