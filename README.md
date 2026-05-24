@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://via.placeholder.com/150x150.png?text=AetherDesk" width="150" height="150" alt="AetherDesk Logo" />
+  <img src="./logo.png" width="150" height="150" alt="AetherDesk Logo" />
   
   # AetherDesk
   
