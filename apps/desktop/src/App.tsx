@@ -1,22 +1,25 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
-import { Nexus } from './workspaces/nexus/Nexus';
-import { Forge } from './workspaces/forge/Forge';
-import { Loom } from './workspaces/loom/Loom';
-import { Artisan } from './workspaces/artisan/Artisan';
-import { Browser } from './workspaces/browser/Browser';
-import { Settings } from './workspaces/settings/Settings';
-import { SwarmRegistry } from './workspaces/swarm/SwarmRegistry';
-import { Features } from './workspaces/features/Features';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
-import { useEffect, useState } from 'react';
 import { hydrateStore } from './core/store/persistence';
+
+const Nexus = lazy(() => import('./workspaces/nexus/Nexus').then(module => ({ default: module.Nexus })));
+const Forge = lazy(() => import('./workspaces/forge/Forge').then(module => ({ default: module.Forge })));
+const Loom = lazy(() => import('./workspaces/loom/Loom').then(module => ({ default: module.Loom })));
+const Artisan = lazy(() => import('./workspaces/artisan/Artisan').then(module => ({ default: module.Artisan })));
+const Browser = lazy(() => import('./workspaces/browser/Browser').then(module => ({ default: module.Browser })));
+const Settings = lazy(() => import('./workspaces/settings/Settings').then(module => ({ default: module.Settings })));
+const SwarmRegistry = lazy(() => import('./workspaces/swarm/SwarmRegistry').then(module => ({ default: module.SwarmRegistry })));
+const Features = lazy(() => import('./workspaces/features/Features').then(module => ({ default: module.Features })));
 import { useWorkflowStore } from './core/store/useWorkflowStore';
 import { useFilesystemStore } from './core/store/useFilesystemStore';
 import { useAiStore } from './core/store/useAiStore';
 import { useArtisanStore } from './core/store/useArtisanStore';
 import { useSwarmStore } from './core/store/useSwarmStore';
 import { useRouterStore } from './core/store/useRouterStore';
+import { useWorkspaceStore } from './core/store/useWorkspaceStore';
+import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
 
 function App() {
   const [isHydrated, setIsHydrated] = useState(false);
@@ -64,6 +67,8 @@ function App() {
     initStores();
   }, []);
 
+  const { hasCompletedOnboarding } = useWorkspaceStore();
+
   if (!isHydrated) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background text-secondary-fixed-dim font-code-md">
@@ -75,22 +80,30 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          {/* Default route redirects to Nexus */}
-          <Route index element={<Navigate to="/nexus" replace />} />
-          
-          {/* Core Workspaces */}
-          <Route path="nexus" element={<Nexus />} />
-          <Route path="forge" element={<Forge />} />
-          <Route path="artisan" element={<Artisan />} />
-          <Route path="loom" element={<Loom />} />
-          <Route path="browser" element={<Browser />} />
-          <Route path="swarm" element={<SwarmRegistry />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="features" element={<Features />} />
-        </Route>
-      </Routes>
+      {!hasCompletedOnboarding && <OnboardingFlow />}
+      <Suspense fallback={
+        <div className="flex h-screen w-screen items-center justify-center bg-background text-secondary-fixed-dim">
+          <span className="material-symbols-outlined animate-spin text-3xl mr-md">sync</span>
+          Loading Workspace...
+        </div>
+      }>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            {/* Default route redirects to Nexus */}
+            <Route index element={<Navigate to="/nexus" replace />} />
+            
+            {/* Core Workspaces */}
+            <Route path="nexus" element={<Nexus />} />
+            <Route path="forge" element={<Forge />} />
+            <Route path="artisan" element={<Artisan />} />
+            <Route path="loom" element={<Loom />} />
+            <Route path="browser" element={<Browser />} />
+            <Route path="swarm" element={<SwarmRegistry />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="features" element={<Features />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </ErrorBoundary>
   );
 }

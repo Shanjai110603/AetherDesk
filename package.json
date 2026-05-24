@@ -8,7 +8,9 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=desktop",
+    "dev:website": "npm run dev --workspace=website",
     "build": "npm run build --workspace=desktop",
+    "build:website": "npm run build --workspace=website",
     "tauri": "tauri"
   }
 }

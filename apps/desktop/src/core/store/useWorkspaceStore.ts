@@ -9,13 +9,18 @@ export interface WorkspaceInfo {
 interface WorkspaceStoreState {
   currentWorkspace: WorkspaceInfo | null;
   recentWorkspaces: WorkspaceInfo[];
+  hasCompletedOnboarding: boolean;
   setCurrentWorkspace: (ws: WorkspaceInfo | null) => void;
   addRecentWorkspace: (ws: WorkspaceInfo) => void;
+  completeOnboarding: () => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   currentWorkspace: null,
   recentWorkspaces: [],
+  hasCompletedOnboarding: false,
+
+  completeOnboarding: () => set({ hasCompletedOnboarding: true }),
 
   setCurrentWorkspace: (ws) => {
     set({ currentWorkspace: ws });

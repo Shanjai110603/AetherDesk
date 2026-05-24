@@ -14,6 +14,16 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "dialog:default",
-    "store:default"
+    "store:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "node", "cmd": "node", "args": ["--version"] },
+        { "name": "python", "cmd": "python", "args": ["--version"] },
+        { "name": "git", "cmd": "git", "args": ["--version"] },
+        { "name": "ollama", "cmd": "ollama", "args": ["--version"] }
+      ]
+    }
   ]
 }
