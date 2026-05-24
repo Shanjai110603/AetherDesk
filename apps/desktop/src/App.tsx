@@ -7,6 +7,7 @@ import { Artisan } from './workspaces/artisan/Artisan';
 import { Browser } from './workspaces/browser/Browser';
 import { Settings } from './workspaces/settings/Settings';
 import { SwarmRegistry } from './workspaces/swarm/SwarmRegistry';
+import { Features } from './workspaces/features/Features';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { useEffect, useState } from 'react';
 import { hydrateStore } from './core/store/persistence';
@@ -15,6 +16,7 @@ import { useFilesystemStore } from './core/store/useFilesystemStore';
 import { useAiStore } from './core/store/useAiStore';
 import { useArtisanStore } from './core/store/useArtisanStore';
 import { useSwarmStore } from './core/store/useSwarmStore';
+import { useRouterStore } from './core/store/useRouterStore';
 
 function App() {
   const [isHydrated, setIsHydrated] = useState(false);
@@ -24,11 +26,39 @@ function App() {
       // Run hydrations in parallel
       await Promise.all([
         hydrateStore('workflow-state', useWorkflowStore, ['nodes', 'edges', 'canvasOffset', 'canvasZoom']),
-        hydrateStore('fs-state', useFilesystemStore, ['openTabs', 'activeTabId']),
+        hydrateStore('fs-state', useFilesystemStore, ['openTabs', 'activeTabId', 'activeFolderPath']),
         hydrateStore('artisan-state', useArtisanStore, ['layers', 'canvasZoom', 'viewport', 'activeTool', 'inspectorTab']),
         hydrateStore('ai-state', useAiStore, ['activeModelId', 'sessions']),
         hydrateStore('swarm-state', useSwarmStore, ['personas']),
       ]);
+
+      // ── Seed the Intelligence Router with available models ──────────────
+      const { initialize, registerModels } = useRouterStore.getState();
+      initialize();
+      const availableModels = useAiStore.getState().models;
+      if (availableModels.length > 0) {
+        registerModels(availableModels.map(m => ({
+          modelId: m.id,
+          providerId: m.providerId,
+          isLocal: m.providerId === 'ollama' || m.providerId === 'local',
+          isAvailable: true,
+          costPer1kInputTokens: m.providerId === 'ollama' || m.providerId === 'local' ? 0 : 0.003,
+          costPer1kOutputTokens: m.providerId === 'ollama' || m.providerId === 'local' ? 0 : 0.006,
+          avgLatencyMs: m.providerId === 'ollama' || m.providerId === 'local' ? 800 : 1500,
+          contextWindow: 128000,
+          lastUpdated: Date.now(),
+        })));
+      }
+      
+      // Load OS-Native API Keys
+      await useAiStore.getState().loadApiKeys();
+
+      // Auto-load workspace directory if one was persisted
+      const { activeFolderPath, loadDirectory } = useFilesystemStore.getState();
+      if (activeFolderPath) {
+        await loadDirectory(activeFolderPath);
+      }
+
       setIsHydrated(true);
     }
     initStores();
@@ -58,6 +88,7 @@ function App() {
           <Route path="browser" element={<Browser />} />
           <Route path="swarm" element={<SwarmRegistry />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="features" element={<Features />} />
         </Route>
       </Routes>
     </ErrorBoundary>

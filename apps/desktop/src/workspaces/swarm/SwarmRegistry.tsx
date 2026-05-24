@@ -27,9 +27,9 @@ const AgentCard: React.FC<{
   const { togglePersonaActive } = useSwarmStore();
 
   return (
-    <button
+    <div
       onClick={onSelect}
-      className={`w-full p-md rounded-lg border transition-all text-left ${
+      className={`w-full p-md rounded-lg border transition-all text-left cursor-pointer ${
         isSelected
           ? 'bg-secondary/10 border-secondary/40 shadow-[0_0_12px_rgba(47,217,244,0.1)]'
           : agent.isActive
@@ -56,7 +56,7 @@ const AgentCard: React.FC<{
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); togglePersonaActive(agent.id); }}
-          className={`w-8 h-5 rounded-full flex items-center transition-all flex-shrink-0 ${
+          className={`w-8 h-5 rounded-full flex items-center transition-all flex-shrink-0 cursor-pointer ${
             agent.isActive ? 'bg-secondary justify-end' : 'bg-outline-variant/50 justify-start'
           }`}
           title={agent.isActive ? 'Deactivate' : 'Activate'}
@@ -71,7 +71,7 @@ const AgentCard: React.FC<{
           </span>
         ))}
       </div>
-    </button>
+    </div>
   );
 };
 

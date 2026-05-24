@@ -59,6 +59,16 @@ export const SideNavBar: React.FC = () => {
       {/* Bottom utilities */}
       <div className="flex flex-col gap-1 pb-1">
         <NavLink
+          to="/features"
+          title="What's New in 2.0"
+          className={({ isActive }) =>
+            `w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150
+             ${isActive ? 'bg-secondary/15 text-secondary-fixed-dim shadow-[inset_0_0_0_1px_rgba(192,193,255,0.25)]' : 'text-outline hover:text-on-surface-variant hover:bg-surface-container-high'}`
+          }
+        >
+          <span className="material-symbols-outlined text-[20px]">rocket_launch</span>
+        </NavLink>
+        <NavLink
           to="/settings"
           title="Settings"
           className={({ isActive }) =>

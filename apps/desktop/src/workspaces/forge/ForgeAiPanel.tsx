@@ -170,7 +170,7 @@ export const ForgeAiPanel: React.FC<ForgeAiPanelProps> = ({
       <div className="flex items-center justify-between px-md py-sm border-b border-outline-variant bg-surface-container-low flex-shrink-0">
         <div className="flex items-center gap-sm">
           <span className="material-symbols-outlined text-secondary text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>smart_toy</span>
-          <span className="text-label-caps font-bold text-on-surface">AI ASSISTANT</span>
+          <span className="text-label-caps font-bold text-on-surface">AGENT</span>
           {activeFileName && (
             <span className="text-label-caps text-outline font-code-md truncate max-w-[120px]">
               · {activeFileName}
@@ -204,13 +204,21 @@ export const ForgeAiPanel: React.FC<ForgeAiPanelProps> = ({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-md flex flex-col gap-md">
         {(!session || session.messages.length === 0) && (
-          <div className="flex flex-col items-center justify-center flex-1 text-center py-xl opacity-50">
-            <span className="material-symbols-outlined text-4xl text-outline mb-sm" style={{ fontVariationSettings: "'FILL' 1" }}>code</span>
-            <p className="text-body-sm text-outline">
-              Ask anything about{' '}
-              <span className="text-secondary font-code-md">{activeFileName ?? 'your code'}</span>
-            </p>
-            <p className="text-label-caps text-outline mt-xs">Select code first for precise context</p>
+          <div className="flex flex-col items-center justify-center flex-1 text-center py-xl relative select-none">
+            <div className="z-10 text-center flex flex-col items-center max-w-[260px]">
+              <h2 className="text-title-sm font-bold text-on-surface select-none tracking-tight">
+                Aether Desk
+              </h2>
+              <p className="text-body-sm text-outline mt-xs mb-md leading-relaxed select-none">
+                Ask anything, @ to mention, / for actions
+              </p>
+              
+              {/* Dynamic model selector pill in the center of the welcome view */}
+              <div className="flex items-center gap-xs bg-surface-container border border-outline-variant px-sm py-1 rounded-full text-label-caps text-secondary font-bold font-code-md cursor-pointer hover:border-secondary transition-all">
+                <span className="text-[12px]">+</span>
+                <span>{activeModel?.name || 'Ollama Model'}</span>
+              </div>
+            </div>
           </div>
         )}
         {session?.messages.map((msg, i) => (

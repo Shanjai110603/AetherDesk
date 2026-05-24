@@ -5,5 +5,10 @@
     "apps/*",
     "packages/*",
     "services/*"
-  ]
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=desktop",
+    "build": "npm run build --workspace=desktop",
+    "tauri": "tauri"
+  }
 }

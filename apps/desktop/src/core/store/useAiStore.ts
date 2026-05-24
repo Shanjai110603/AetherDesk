@@ -77,6 +77,7 @@ interface AiStoreState {
   // Securely store API key in Rust memory + update frontend state
   saveApiKey: (providerId: AIProviderId, key: string) => Promise<void>;
   getApiKey: (providerId: AIProviderId) => string | undefined;
+  loadApiKeys: () => Promise<void>;
   clearForgeSession: () => void;     // Reset the forge chat
 }
 
@@ -100,6 +101,12 @@ const initialModels: AIModel[] = [
   { id: 'gpt-4o-mini',        name: 'GPT-4o Mini',         providerId: 'openai',    contextWindow: 128000 },
   { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', providerId: 'anthropic', contextWindow: 200000 },
   { id: 'claude-3-haiku-20240307',    name: 'Claude 3 Haiku',    providerId: 'anthropic', contextWindow: 200000 },
+  { id: 'gemini-1.5-pro',     name: 'Gemini 1.5 Pro',      providerId: 'gemini',    contextWindow: 1000000 },
+  { id: 'gemini-1.5-flash',   name: 'Gemini 1.5 Flash',    providerId: 'gemini',    contextWindow: 1000000 },
+  { id: 'gemini-2.0-flash',   name: 'Gemini 2.0 Flash',    providerId: 'gemini',    contextWindow: 1000000 },
+  { id: 'openrouter/auto',    name: 'OpenRouter (Auto)',    providerId: 'openrouter', contextWindow: 200000 },
+  { id: 'openrouter/deepseek/deepseek-r1', name: 'DeepSeek R1 (OpenRouter)', providerId: 'openrouter', contextWindow: 128000 },
+  { id: 'openrouter/meta-llama/llama-3.1-70b-instruct', name: 'Llama 3.1 70B (OpenRouter)', providerId: 'openrouter', contextWindow: 128000 },
 ];
 
 export const FORGE_SESSION_ID = 'forge-ai-panel';
@@ -208,11 +215,15 @@ export const useAiStore = create<AiStoreState>((set, get) => ({
     })),
 
   saveApiKey: async (providerId, key) => {
-    // Send key to Rust's in-memory store (never touches disk as plain text)
+    // Send key to OS-native secure enclave (Keychain, DPAPI, etc.)
     try {
-      await invoke('set_api_key', { provider: providerId, key });
+      if (key) {
+        await invoke('store_secret', { key: providerId, secret: key });
+      } else {
+        await invoke('delete_secret', { key: providerId });
+      }
     } catch (e) {
-      console.error('Failed to save key to Rust state:', e);
+      console.error('Failed to save key to OS keychain:', e);
     }
     // Also keep a transient copy in the JS store for quick lookups
     set(state => ({
@@ -228,4 +239,21 @@ export const useAiStore = create<AiStoreState>((set, get) => ({
   },
 
   getApiKey: (providerId) => get().apiKeys[providerId],
+
+  loadApiKeys: async () => {
+    const providers: AIProviderId[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
+    const keys: Partial<Record<AIProviderId, string>> = {};
+    for (const p of providers) {
+      try {
+        const secret = await invoke<string>('retrieve_secret', { key: p });
+        if (secret) {
+          keys[p] = secret;
+          get().setProviderConfigured(p, true);
+        }
+      } catch (e) {
+        // Not found or access denied
+      }
+    }
+    set(state => ({ apiKeys: { ...state.apiKeys, ...keys } }));
+  },
 }));

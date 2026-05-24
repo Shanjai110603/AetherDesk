@@ -4,6 +4,8 @@ import { listen } from '@tauri-apps/api/event';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { useAiStore } from '../store/useAiStore';
 import type { AIChatMessage } from '../store/useAiStore';
+import { useCostStore } from '../store/useCostStore';
+import { useRouterStore } from '../store/useRouterStore';
 
 // ── Normalized stream event types (mirrors Rust StreamEvent enum) ─────────────
 export interface StreamEvent {
@@ -39,12 +41,34 @@ export function useAiStream() {
   const sendMessage = useCallback(async (
     sessionId: string,
     userContent: string,
-    modelId: string,
-    providerId: string,
+    modelId?: string,
+    providerId?: string,
   ) => {
-    const { sessions, addMessage, getApiKey } = useAiStore.getState();
+    const { sessions, addMessage, getApiKey, models } = useAiStore.getState();
     const session = sessions[sessionId];
     if (!session) return;
+
+    let finalModelId = modelId;
+    let finalProviderId = providerId;
+
+    if (!finalModelId || !finalProviderId) {
+      try {
+        const { selectBestModel } = useRouterStore.getState();
+        const context = {
+          taskType: userContent.includes('calculate') ? 'formatting' : 'generic',
+          costSensitivity: 'standard',
+          targetLatency: 'normal',
+          contextSize: userContent.length,
+        };
+        finalModelId = await selectBestModel(context as any);
+        const matchedModel = models.find(m => m.id === finalModelId);
+        finalProviderId = matchedModel ? matchedModel.providerId : 'ollama';
+      } catch {
+        finalModelId = finalModelId || useAiStore.getState().activeModelId || 'llama3:8b';
+        const matchedModel = models.find(m => m.id === finalModelId);
+        finalProviderId = finalProviderId || (matchedModel ? matchedModel.providerId : 'ollama');
+      }
+    }
 
     // 1. Add the user message immediately
     const userMsg: AIChatMessage = {
@@ -99,10 +123,28 @@ export function useAiStream() {
             lastTelemetry: {
               inference_ms: payload.inference_ms ?? 0,
               tokens_per_sec: payload.tokens_per_sec ?? 0,
-              provider: providerId,
-              model: modelId,
+              provider: finalProviderId,
+              model: finalModelId,
             }
           });
+          // ── Record cost telemetry ───────────────────────────────────
+          if (payload.total_tokens != null && payload.prompt_tokens != null) {
+            const inputToks = payload.prompt_tokens;
+            const outputToks = payload.total_tokens - payload.prompt_tokens;
+            // Rough cost estimate; real prices should come from model metadata
+            const costPer1kIn  = finalModelId.includes('gpt-4') ? 0.03 : finalModelId.includes('gpt-3') ? 0.002 : 0.0001;
+            const costPer1kOut = finalModelId.includes('gpt-4') ? 0.06 : finalModelId.includes('gpt-3') ? 0.002 : 0.0001;
+            const costUsd = (inputToks / 1000) * costPer1kIn + (outputToks / 1000) * costPer1kOut;
+            useCostStore.getState().recordTokens({
+              sessionId,
+              providerId: finalProviderId,
+              modelId: finalModelId,
+              inputTokens: inputToks,
+              outputTokens: outputToks,
+              costUsd,
+              timestamp: Date.now(),
+            });
+          }
           break;
         }
 
@@ -114,7 +156,7 @@ export function useAiStream() {
         }
 
         case 'error': {
-          console.error(`[AetherDesk Intelligence] Stream error from ${providerId}:`, payload.message);
+          console.error(`[AetherDesk Intelligence] Stream error from ${finalProviderId}:`, payload.message);
           // Surface the error in the chat as a system message
           const errSession = store.sessions[sessionId];
           if (errSession) {
@@ -184,20 +226,20 @@ export function useAiStream() {
 
     const request: IntelligenceRequest = {
       session_id: sessionId,
-      model: modelId,
+      model: finalModelId,
       messages: [...historyMessages, { role: 'user', content: finalUserContent }],
       temperature: 0.7,
     };
 
     // 5. Look up the API key for cloud providers (transient in-memory only)
-    const apiKey = getApiKey(providerId as any) ?? null;
+    const apiKey = getApiKey(finalProviderId as any) ?? null;
 
     // 6. Dispatch to Rust unified intelligence router
     useAiStore.setState({ isStreaming: true });
     try {
       await invoke('ai_chat_stream', {
         request,
-        provider: providerId,
+        provider: finalProviderId,
         apiKey,
       });
     } catch (err: any) {

@@ -1,6 +1,7 @@
 mod commands;
 mod providers;
 mod orchestration;
+mod keychain;
 
 use commands::{AiState, RuntimeState, SemanticState};
 use orchestration::{Engine, EventBus, spawn_event_forwarder};
@@ -41,17 +42,22 @@ pub fn run() {
             commands::ai_chat_stream,
             commands::ollama_list_models,
             commands::ollama_check_status,
-            commands::set_api_key,
             commands::set_ollama_url,
             // Filesystem
             commands::fs_read_dir,
             commands::fs_read_file,
             commands::fs_write_file,
             commands::fs_write_base64_file,
+            commands::fs_create_dir,
+            commands::fs_delete,
+            commands::fs_rename,
             commands::execute_sandboxed_command,
+            commands::execute_build_command,
             // Runtime
             commands::runtime_start,
             commands::runtime_stop,
+            commands::terminal_spawn,
+            commands::terminal_send_input,
             // Semantic Engine
             commands::semantic_index_workspace,
             commands::semantic_query_symbols,
@@ -64,6 +70,10 @@ pub fn run() {
             commands::start_workspace_indexer,
             commands::read_agent_memory,
             commands::write_agent_memory,
+            // OS-Native Secrets
+            keychain::store_secret,
+            keychain::retrieve_secret,
+            keychain::delete_secret,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

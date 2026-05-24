@@ -1,10 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { NexusSlashPalette } from './NexusSlashPalette';
 import { NexusMentionPalette } from './NexusMentionPalette';
 import { NEXUS_SLASH_COMMANDS, type SlashCommand } from './nexusCommands';
 import { useAiStore } from '../../core/store/useAiStore';
 import type { AIChatMessage } from '../../core/store/useAiStore';
 import { useAiStream } from '../../core/hooks/useAiStream';
+import { useAgentLoop, type AgentLoopState } from '../../core/ai/useAgentLoop';
+import { AgentApprovalOverlay } from './AgentApprovalOverlay';
 import { invoke } from '@tauri-apps/api/core';
 import { onAnnotation, type AnnotationEventDetail } from '../../core/events/aetherDeskEvents';
 import { useFilesystemStore, type FileNode } from '../../core/store/useFilesystemStore';
@@ -125,6 +127,7 @@ const ContextChip: React.FC<{ icon: string; color: string; label: string; onRemo
 export const Nexus: React.FC = () => {
   const { models, activeModelId, sessions, activeSessionId, isStreaming, lastTelemetry, newSession } = useAiStore();
   const { sendMessage } = useAiStream();
+  const { startAutonomousLoop } = useAgentLoop();
   const { fileTree } = useFilesystemStore();
   const { personas } = useSwarmStore();
   const [input, setInput] = useState('');
@@ -136,6 +139,16 @@ export const Nexus: React.FC = () => {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [temperature, setTemperature] = useState(0.7);
   const [showTempSlider, setShowTempSlider] = useState(false);
+  // ── Agent Mode ──────────────────────────────────────────────────────────────
+  const [agentMode, setAgentMode] = useState(false);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [personaDropdownOpen, setPersonaDropdownOpen] = useState(false);
+  const [agentLoopState, setAgentLoopState] = useState<AgentLoopState>({
+    status: 'idle',
+    currentStep: 0,
+    maxSteps: 10,
+    logs: [],
+  });
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const activeModel = models.find(m => m.id === activeModelId);
@@ -298,12 +311,38 @@ export const Nexus: React.FC = () => {
     }
     if (!text) return;
     setInput('');
-    await sendMessage(activeSessionId, text, activeModelId, activeModel.providerId);
+
+    if (agentMode) {
+      // ── Agent Loop execution path ──────────────────────────────────────────
+      if (!activeModelId || !activeModel) return;
+      setAgentLoopState({ status: 'running', currentStep: 0, maxSteps: 10, logs: ['Initializing agent...'] });
+      const selectedPersona = personas.find(p => p.id === selectedPersonaId);
+      try {
+        await startAutonomousLoop(
+          text,
+          activeModelId,
+          activeModel.providerId,
+          (update) => setAgentLoopState(prev => ({
+            ...prev,
+            ...update,
+            logs: update.logs ? [...prev.logs, ...update.logs] : prev.logs,
+          })),
+          selectedPersona?.id,
+        );
+      } catch (err) {
+        setAgentLoopState(prev => ({ ...prev, status: 'error', logs: [...prev.logs, `Error: ${String(err)}`] }));
+      }
+    } else {
+      // ── Normal chat path ──────────────────────────────────────────────────
+      await sendMessage(activeSessionId, text, activeModelId, activeModel.providerId);
+    }
   };
 
   return (
     // Root: full width + height, horizontal flex — NO react-resizable-panels
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', background: '#0f0f11' }}>
+      {/* Agent Approval Overlay — sits outside all layout so it overlays everything */}
+      <AgentApprovalOverlay />
 
       {/* ── LEFT: Sessions sidebar ── fixed 220px */}
       <div style={{ width: 220, minWidth: 220, maxWidth: 220, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
@@ -359,7 +398,30 @@ export const Nexus: React.FC = () => {
 
         {/* Model bar */}
         <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)', flexShrink: 0, position: 'relative', zIndex: 10 }}>
-          <div style={{ position: 'relative' }}>
+          {/* Agent mode toggle + model picker row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Agent Mode Pill */}
+            <button
+              onClick={() => { setAgentMode(m => !m); setAgentLoopState({ status: 'idle', currentStep: 0, maxSteps: 10, logs: [] }); }}
+              title={agentMode ? 'Switch to Chat mode' : 'Switch to Agent mode'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+                borderRadius: 8, border: '1px solid', cursor: 'pointer', fontWeight: 700, fontSize: 11,
+                letterSpacing: '0.05em', transition: 'all 0.2s',
+                background: agentMode ? 'rgba(232,140,72,0.15)' : 'rgba(255,255,255,0.06)',
+                borderColor: agentMode ? 'rgba(232,140,72,0.4)' : 'rgba(255,255,255,0.1)',
+                color: agentMode ? '#e88c48' : '#908fa0',
+                boxShadow: agentMode ? '0 0 12px rgba(232,140,72,0.2)' : 'none',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>
+                {agentMode ? 'smart_toy' : 'chat'}
+              </span>
+              {agentMode ? 'AGENT' : 'CHAT'}
+            </button>
+
+            {/* Model Dropdown */}
+            <div style={{ position: 'relative' }}>
             <button
               onClick={() => setModelDropdownOpen(o => !o)}
               style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#e4e3f4' }}
@@ -389,8 +451,16 @@ export const Nexus: React.FC = () => {
           </div>
           {isStreaming && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2fd9f4', animation: 'pulse 1s infinite' }} />
-              <span style={{ fontSize: 10, fontWeight: 700, color: '#2fd9f4', letterSpacing: '0.1em' }}>STREAMING</span>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: agentMode ? '#e88c48' : '#2fd9f4', animation: 'pulse 1s infinite' }} />
+              <span style={{ fontSize: 10, fontWeight: 700, color: agentMode ? '#e88c48' : '#2fd9f4', letterSpacing: '0.1em' }}>
+                {agentMode ? `AGENT STEP ${agentLoopState.currentStep}/${agentLoopState.maxSteps}` : 'STREAMING'}
+              </span>
+            </div>
+          )}
+          {agentLoopState.status === 'running' && !isStreaming && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#e88c48', animation: 'pulse 1s infinite' }} />
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#e88c48', letterSpacing: '0.1em' }}>AGENT RUNNING</span>
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#666', position: 'relative' }}>
@@ -422,10 +492,21 @@ export const Nexus: React.FC = () => {
         <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, position: 'relative', zIndex: 10 }}
           onClick={() => setModelDropdownOpen(false)}>
           {(!activeSession || activeSession.messages.length === 0) && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, textAlign: 'center', opacity: 0.4 }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 56, color: '#908fa0', marginBottom: 16, fontVariationSettings: "'FILL' 1" }}>smart_toy</span>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#c4c3d4', margin: '0 0 4px' }}>AetherDesk Intelligence</h2>
-              <p style={{ fontSize: 13, color: '#666' }}>Describe what you want to build, automate, or explore.</p>
+            <div className="flex flex-col items-center justify-center flex-1 text-center py-xl relative select-none">
+              <div className="z-10 text-center flex flex-col items-center max-w-[280px]">
+                <h2 className="text-title-sm font-bold text-on-surface select-none tracking-tight text-xl mb-xs">
+                  Aether Desk
+                </h2>
+                <p className="text-body-sm text-outline mt-xs mb-md leading-relaxed select-none">
+                  Ask anything, @ to mention, / for actions
+                </p>
+                
+                {/* Dynamic model selector pill in the center */}
+                <div className="flex items-center gap-xs bg-surface-container border border-outline-variant px-sm py-1 rounded-full text-label-caps text-secondary font-bold font-code-md cursor-pointer hover:border-secondary transition-all">
+                  <span className="text-[12px] font-bold text-secondary mr-[2px]">+</span>
+                  <span>{activeModel?.name || 'Ollama Model'}</span>
+                </div>
+              </div>
             </div>
           )}
           {activeSession?.messages.map((msg, i) => (
@@ -529,12 +610,27 @@ export const Nexus: React.FC = () => {
                 )}
               </div>
               <button
-                onClick={isStreaming ? () => useAiStore.setState({ isStreaming: false }) : handleExecute}
+                onClick={agentLoopState.status === 'running' || isStreaming
+                  ? () => { useAiStore.setState({ isStreaming: false }); setAgentLoopState(prev => ({ ...prev, status: 'idle' })); }
+                  : handleExecute}
                 disabled={slashMode || mentionMode}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 8, border: 'none', cursor: (input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode && !isStreaming ? 'pointer' : 'default', fontWeight: 700, fontSize: 11, background: isStreaming ? '#b00020' : (input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode ? '#2fd9f4' : 'rgba(255,255,255,0.08)', color: isStreaming || ((input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode) ? '#000' : '#666', transition: 'all 0.15s', letterSpacing: '0.05em' }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 8, border: 'none',
+                  cursor: (input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode ? 'pointer' : 'default',
+                  fontWeight: 700, fontSize: 11,
+                  background: (agentLoopState.status === 'running' || isStreaming)
+                    ? (agentMode ? '#e88c48' : '#b00020')
+                    : (input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode
+                      ? (agentMode ? '#e88c48' : '#2fd9f4')
+                      : 'rgba(255,255,255,0.08)',
+                  color: (agentLoopState.status === 'running' || isStreaming || ((input.trim() || stagedAnnotation || stagedFiles.length > 0) && !slashMode && !mentionMode)) ? '#000' : '#666',
+                  transition: 'all 0.15s', letterSpacing: '0.05em',
+                }}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{isStreaming ? 'stop' : 'send'}</span>
-                {isStreaming ? 'STOP' : 'EXECUTE'}
+                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
+                  {agentLoopState.status === 'running' || isStreaming ? 'stop' : agentMode ? 'play_arrow' : 'send'}
+                </span>
+                {agentLoopState.status === 'running' || isStreaming ? 'STOP' : agentMode ? 'RUN AGENT' : 'EXECUTE'}
               </button>
             </div>
           </div>
@@ -547,6 +643,66 @@ export const Nexus: React.FC = () => {
           <span style={{ fontSize: 10, fontWeight: 700, color: '#908fa0', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Active Context</span>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+
+
+          {/* Agent Status Panel — shown in agent mode */}
+          {agentMode && (
+            <div style={{ marginBottom: 4 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: '#e88c48', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 12 }}>smart_toy</span>
+                AGENT STATUS
+              </p>
+              <div style={{ background: 'rgba(232,140,72,0.05)', borderRadius: 8, border: '1px solid rgba(232,140,72,0.15)', overflow: 'hidden' }}>
+                {/* Status row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: 11, color: '#666' }}>Status</span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', padding: '2px 7px', borderRadius: 4,
+                    background: agentLoopState.status === 'running' ? 'rgba(232,140,72,0.2)' : agentLoopState.status === 'completed' ? 'rgba(47,217,244,0.15)' : agentLoopState.status === 'error' ? 'rgba(207,102,121,0.2)' : 'rgba(255,255,255,0.06)',
+                    color: agentLoopState.status === 'running' ? '#e88c48' : agentLoopState.status === 'completed' ? '#2fd9f4' : agentLoopState.status === 'error' ? '#cf6679' : '#666',
+                  }}>
+                    {agentLoopState.status.toUpperCase()}
+                  </span>
+                </div>
+                {/* Step progress */}
+                <div style={{ padding: '7px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: '#666' }}>Progress</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#e88c48' }}>{agentLoopState.currentStep} / {agentLoopState.maxSteps}</span>
+                  </div>
+                  <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 2, transition: 'width 0.4s',
+                      background: agentLoopState.status === 'completed' ? '#2fd9f4' : agentLoopState.status === 'error' ? '#cf6679' : '#e88c48',
+                      width: `${(agentLoopState.currentStep / agentLoopState.maxSteps) * 100}%`,
+                    }} />
+                  </div>
+                </div>
+                {/* Log tail */}
+                <div style={{ maxHeight: 120, overflowY: 'auto', padding: '6px 12px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {agentLoopState.logs.length === 0 ? (
+                    <span style={{ fontSize: 10, color: '#444', fontStyle: 'italic' }}>No activity yet</span>
+                  ) : (
+                    agentLoopState.logs.slice(-8).map((log, i) => (
+                      <div key={i} style={{ fontSize: 10, color: log.includes('Error') || log.includes('failed') ? '#cf6679' : log.includes('complete') || log.includes('success') ? '#2fd9f4' : '#908fa0', lineHeight: 1.4, fontFamily: 'monospace' }}>
+                        {log}
+                      </div>
+                    ))
+                  )}
+                </div>
+                {/* Reset button */}
+                {(agentLoopState.status === 'completed' || agentLoopState.status === 'error') && (
+                  <button
+                    onClick={() => setAgentLoopState({ status: 'idle', currentStep: 0, maxSteps: 10, logs: [] })}
+                    style={{ width: '100%', padding: '6px 12px', background: 'rgba(255,255,255,0.04)', border: 'none', borderTop: '1px solid rgba(255,255,255,0.06)', color: '#908fa0', fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.05em' }}
+                  >
+                    RESET
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Telemetry */}
           <div>

@@ -18,10 +18,18 @@ interface RuntimeStoreState {
   logs: LogEntry[];
   previewUrl: string | null;
 
+  isTerminalActive: boolean;
+  terminalLogs: LogEntry[];
+
   startRuntime: (workspacePath: string, command: string) => Promise<void>;
   stopRuntime: () => Promise<void>;
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
   clearLogs: () => void;
+
+  spawnTerminal: (workspacePath: string) => Promise<void>;
+  sendTerminalInput: (input: string) => Promise<void>;
+  addTerminalLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
+  clearTerminalLogs: () => void;
 }
 
 export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
@@ -32,10 +40,13 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
   logs: [],
   previewUrl: null,
 
+  isTerminalActive: false,
+  terminalLogs: [],
+
   startRuntime: async (workspacePath, command) => {
     const { sessionId } = get();
-    set({ status: 'starting', logs: [] });
-    get().addLog({ type: 'system', message: `▶ Starting: ${command}` });
+    set({ status: 'starting' });
+    get().addLog({ type: 'system', message: `▶ Starting dev server: ${command}` });
 
     try {
       const result = await invoke<{ running: boolean; pid: number | null; port: number | null }>('runtime_start', {
@@ -62,14 +73,46 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
     try {
       await invoke('runtime_stop', { sessionId });
     } catch (_) {}
-    get().addLog({ type: 'system', message: '⏹ Runtime stopped.' });
+    get().addLog({ type: 'system', message: '⏹ Dev server stopped.' });
     set({ status: 'stopped', pid: null, previewUrl: null });
   },
 
   addLog: (log) => {
     const entry: LogEntry = { ...log, id: Math.random().toString(36), timestamp: Date.now() };
-    set(state => ({ logs: [...state.logs.slice(-500), entry] })); // keep last 500
+    set(state => ({ logs: [...state.logs.slice(-500), entry] }));
   },
 
   clearLogs: () => set({ logs: [] }),
+
+  spawnTerminal: async (workspacePath) => {
+    set({ isTerminalActive: true });
+    try {
+      await invoke('terminal_spawn', {
+        workspacePath,
+        sessionId: 'interactive-terminal',
+      });
+    } catch (err) {
+      const msg = String(err);
+      get().addTerminalLog({ type: 'stderr', message: `Terminal initialization failed: ${msg}` });
+    }
+  },
+
+  sendTerminalInput: async (input) => {
+    try {
+      await invoke('terminal_send_input', {
+        sessionId: 'interactive-terminal',
+        input,
+      });
+    } catch (err) {
+      const msg = String(err);
+      get().addTerminalLog({ type: 'stderr', message: `Terminal input failed: ${msg}` });
+    }
+  },
+
+  addTerminalLog: (log) => {
+    const entry: LogEntry = { ...log, id: Math.random().toString(36), timestamp: Date.now() };
+    set(state => ({ terminalLogs: [...state.terminalLogs.slice(-1000), entry] }));
+  },
+
+  clearTerminalLogs: () => set({ terminalLogs: [] }),
 }));

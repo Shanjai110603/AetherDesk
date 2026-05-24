@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { Capability } from '../ai/tools/types';
+import { useWorkspaceStore } from './useWorkspaceStore';
 
 // ── Agent Persona ────────────────────────────────────────────────────────────
 
@@ -203,10 +204,12 @@ export const useSwarmStore = create<SwarmStoreState>((set, get) => ({
 
   saveMemoryToDisk: async (agentId) => {
     const entries = get().memory[agentId] || [];
+    const ws = useWorkspaceStore.getState().currentWorkspace;
+    const path = ws ? `${ws.path}/.aether/agent-memory/${agentId}.json` : `.aether/agent-memory/${agentId}.json`;
     try {
       const data = JSON.stringify(entries, null, 2);
       await invoke('fs_write_file', {
-        path: `.aether/agent-memory/${agentId}.json`,
+        path,
         content: data,
       });
     } catch (err) {
@@ -215,13 +218,15 @@ export const useSwarmStore = create<SwarmStoreState>((set, get) => ({
   },
 
   loadMemoryFromDisk: async (agentId) => {
+    const ws = useWorkspaceStore.getState().currentWorkspace;
+    const path = ws ? `${ws.path}/.aether/agent-memory/${agentId}.json` : `.aether/agent-memory/${agentId}.json`;
     try {
       const data = await invoke<string>('fs_read_file', {
-        path: `.aether/agent-memory/${agentId}.json`,
+        path,
       });
       const entries: AgentMemoryEntry[] = JSON.parse(data);
       set(state => ({ memory: { ...state.memory, [agentId]: entries } }));
-    } catch {
+    } catch (e) {
       // File doesn't exist yet — that's fine, start with empty memory
     }
   },

@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
+/** Normalize to forward-slashes (Tauri accepts both on Windows) */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+/** Join two path segments safely, normalizing separators */
+function joinPath(parent: string, child: string): string {
+  const p = normalizePath(parent).replace(/\/+$/, '');
+  const c = normalizePath(child).replace(/^\/+/, '');
+  return `${p}/${c}`;
+}
+
 
 export interface FileNode {
   name: string;
@@ -34,13 +46,19 @@ interface FilesystemStoreState {
   openTabs: EditorTab[];
   activeTabId: string | null;
   isLoading: boolean;
+  activeFolderPath: string | null;
 
+  setActiveFolder: (path: string | null) => void;
   loadDirectory: (path: string) => Promise<void>;
   openFile: (node: FileNode) => Promise<void>;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   updateTabContent: (tabId: string, content: string) => void;
   saveActiveFile: () => Promise<void>;
+  createFile: (fileName: string) => Promise<void>;
+  createDirectory: (dirName: string) => Promise<void>;
+  deletePath: (path: string) => Promise<void>;
+  renamePath: (oldPath: string, newName: string) => Promise<void>;
 }
 
 export const useFilesystemStore = create<FilesystemStoreState>((set, get) => ({
@@ -48,9 +66,12 @@ export const useFilesystemStore = create<FilesystemStoreState>((set, get) => ({
   openTabs: [],
   activeTabId: null,
   isLoading: false,
+  activeFolderPath: null,
+
+  setActiveFolder: (path) => set({ activeFolderPath: path }),
 
   loadDirectory: async (path) => {
-    set({ isLoading: true });
+    set({ isLoading: true, activeFolderPath: path });
     try {
       const tree = await invoke<FileNode[]>('fs_read_dir', { path });
       
@@ -127,6 +148,94 @@ export const useFilesystemStore = create<FilesystemStoreState>((set, get) => ({
       }));
     } catch (err) {
       console.error('Failed to save:', err);
+    }
+  },
+
+  createFile: async (fileName: string) => {
+    const { loadDirectory, activeFolderPath } = get();
+    const { useWorkspaceStore } = await import('./useWorkspaceStore');
+    const ws = useWorkspaceStore.getState().currentWorkspace;
+    if (!ws) {
+      console.warn("Cannot create file, no workspace open");
+      return;
+    }
+    const parentPath = normalizePath(activeFolderPath || ws.path);
+    const path = joinPath(parentPath, fileName);
+    try {
+      await invoke('fs_write_file', { path, content: '' });
+      await loadDirectory(ws.path);
+      const name = fileName.split(/[\\\/]/).pop() || fileName;
+      const extension = name.split('.').pop() || '';
+      get().openFile({ path, name, is_dir: false, extension });
+    } catch (err) {
+      console.error('Failed to create file:', err);
+    }
+  },
+
+  createDirectory: async (dirName: string) => {
+    const { loadDirectory, activeFolderPath } = get();
+    const { useWorkspaceStore } = await import('./useWorkspaceStore');
+    const ws = useWorkspaceStore.getState().currentWorkspace;
+    if (!ws) {
+      console.warn("Cannot create directory, no workspace open");
+      return;
+    }
+    const parentPath = normalizePath(activeFolderPath || ws.path);
+    const path = joinPath(parentPath, dirName);
+    try {
+      await invoke('fs_create_dir', { path });
+      await loadDirectory(ws.path);
+    } catch (err) {
+      console.error('Failed to create directory:', err);
+    }
+  },
+
+  deletePath: async (path: string) => {
+    const { loadDirectory, closeTab } = get();
+    const { useWorkspaceStore } = await import('./useWorkspaceStore');
+    const ws = useWorkspaceStore.getState().currentWorkspace;
+    if (!ws) {
+      console.warn("Cannot delete, no workspace open");
+      return;
+    }
+    try {
+      await invoke('fs_delete', { path });
+      closeTab(path);
+      await loadDirectory(ws.path);
+    } catch (err) {
+      console.error('Failed to delete path:', err);
+    }
+  },
+
+  renamePath: async (oldPath: string, newName: string) => {
+    const { loadDirectory, closeTab, openTabs } = get();
+    const { useWorkspaceStore } = await import('./useWorkspaceStore');
+    const ws = useWorkspaceStore.getState().currentWorkspace;
+    if (!ws) {
+      console.warn("Cannot rename, no workspace open");
+      return;
+    }
+    
+    const normalizedOld = normalizePath(oldPath);
+    const parts = normalizedOld.split('/');
+    parts.pop();
+    const parentDir = parts.join('/');
+    const newPath = joinPath(parentDir, newName);
+
+    try {
+      await invoke('fs_rename', { oldPath, newPath });
+      
+      const existingTab = openTabs.find(t => t.path === oldPath);
+      if (existingTab) {
+        closeTab(oldPath);
+        const name = newName;
+        const extension = newName.split('.').pop() || '';
+        get().openFile({ path: newPath, name, is_dir: false, extension });
+      }
+      
+      await loadDirectory(ws.path);
+    } catch (err) {
+      console.error('Failed to rename path:', err);
     }
   },
 }));

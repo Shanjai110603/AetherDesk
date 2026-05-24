@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
+import { pathToLanguage } from '../../store/useDiffReviewStore';
+import { useTelemetryStore } from '../../store/useTelemetryStore';
 import type { ToolCall, ToolResult, IToolHandler, Capability } from './types';
 
 // Built-in basic tools
@@ -40,10 +42,42 @@ const fsWriteTool: IToolHandler = {
     isDestructive: true // Require user approval to overwrite files
   },
   execute: async (params) => {
-    try {
-      if (typeof params.path !== 'string' || typeof params.content !== 'string') {
-        return { success: false, error: 'path and content must be strings' };
+    // Import inside function to avoid circular deps at module load time
+    const { useDiffReviewStore } = await import('../../store/useDiffReviewStore');
+    const diffStore = useDiffReviewStore.getState();
+
+    // Ensure we have both path and content strings
+    if (typeof params.path !== 'string' || typeof params.content !== 'string') {
+      return { success: false, error: 'path and content must be strings' };
+    }
+
+    // Stage the diff for user review. The old content is fetched lazily.
+    const oldContent = await (async () => {
+      try {
+        // Attempt to read the existing file; if it fails we treat as new file.
+        // Using Tauri invoke directly to avoid importing other stores.
+        const existing = await import('@tauri-apps/api/core').then(m => m.invoke('fs_read_file', { path: params.path }));
+        return typeof existing === 'string' ? existing : '';
+      } catch {
+        return '';
       }
+    })();
+
+    const diffPromise = diffStore.stageDiff({
+      path: params.path,
+      oldContent,
+      newContent: params.content,
+      summary: '', // Let store generate a summary
+      language: pathToLanguage(params.path),
+    });
+
+    const approved = await diffPromise;
+    if (!approved) {
+      return { success: false, error: 'User rejected file write' };
+    }
+
+    // User approved – perform the actual write.
+    try {
       await invoke('fs_write_file', { path: params.path, content: params.content });
       return { success: true, payload: `Successfully wrote to ${params.path}` };
     } catch (e: any) {
@@ -138,8 +172,8 @@ const delegateTaskTool: IToolHandler = {
 
 export class ToolBroker {
   private handlers: Map<string, IToolHandler> = new Map();
-  // Mock capabilities for now (In real architecture, these are passed per-agent)
-  private activeCapabilities: Set<Capability> = new Set(['READ_FS', 'WORKFLOW_EXECUTION']);
+  // Authorize all core capabilities by default, gated by user approval overlays
+  private activeCapabilities: Set<Capability> = new Set(['READ_FS', 'WRITE_FS', 'EXEC_CMD', 'WORKFLOW_EXECUTION']);
   
   // UX Approval Callback (Injected by React)
   public onRequestApproval?: (toolName: string, commandDetails: Record<string, unknown>) => Promise<boolean>;
@@ -184,13 +218,31 @@ export class ToolBroker {
       }
     }
 
-    // 3. Execute
+    // 3. Execute with Telemetry
+    const startTime = Date.now();
     try {
       const context = { onDelegateTask: this.onDelegateTask };
       const result = await handler.execute(call.parameters, context);
+      
+      const durationMs = Date.now() - startTime;
+      useTelemetryStore.getState().logEvent('agent_execution', {
+        toolName: call.name,
+        status: result.success ? 'success' : 'failure',
+        error: result.error,
+      }, durationMs);
+
       return result;
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      const durationMs = Date.now() - startTime;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      useTelemetryStore.getState().logEvent('agent_execution', {
+        toolName: call.name,
+        status: 'failure',
+        error: errorMessage,
+      }, durationMs);
+
+      return { success: false, error: errorMessage };
     }
   }
 }

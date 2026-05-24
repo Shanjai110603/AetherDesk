@@ -47,13 +47,22 @@ export function useAgentLoop() {
       // System prompt setting up the ReAct pattern
       const systemPrompt = `${personaPrompt}
 Your objective is: ${objective}
-You have access to tools. To use a tool, you MUST output a JSON block like this:
+
+You have access to the following tools:
+1. fs_read: Read a file. Args: { "path": "absolute_path_string" }
+2. fs_write: Write a file. Args: { "path": "absolute_path_string", "content": "file_content_string" }
+3. execute_terminal: Run a terminal command. Args: { "command": "command_string" }
+4. semantic_query: Query the semantic engine for symbols. Args: { "query": "search_string" }
+5. delegate_task: Delegate to another agent. Args: { "agentId": "string", "objective": "string" }
+
+To use a tool, you MUST output a JSON block like this:
 \`\`\`tool_call
 {
-  "tool": "search_workspace",
-  "args": { "query": "auth component" }
+  "tool": "fs_read",
+  "args": { "path": "/path/to/file.ts" }
 }
 \`\`\`
+
 If you have completed the objective, output:
 \`\`\`tool_call
 {

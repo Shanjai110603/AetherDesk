@@ -108,6 +108,24 @@ export const NODE_LIBRARY: NodeTemplate[] = [
   },
   // Execution
   {
+    type: 'search_workspace', label: 'Semantic Search', category: 'execution',
+    icon: 'manage_search', iconColor: 'text-tertiary',
+    defaultConfig: { query: '' },
+    ports: [{ id: 'in', label: 'Input', type: 'input' }, { id: 'out', label: 'Output', type: 'output' }],
+  },
+  {
+    type: 'fs_read', label: 'Read File', category: 'execution',
+    icon: 'description', iconColor: 'text-tertiary',
+    defaultConfig: { path: '' },
+    ports: [{ id: 'in', label: 'Input', type: 'input' }, { id: 'out', label: 'Output', type: 'output' }],
+  },
+  {
+    type: 'fs_write', label: 'Write File', category: 'execution',
+    icon: 'edit_document', iconColor: 'text-tertiary',
+    defaultConfig: { path: '', content: '' },
+    ports: [{ id: 'in', label: 'Input', type: 'input' }, { id: 'out', label: 'Output', type: 'output' }],
+  },
+  {
     type: 'python', label: 'Python Script', category: 'execution',
     icon: 'code', iconColor: 'text-tertiary',
     defaultConfig: { script: 'print("hello")' },

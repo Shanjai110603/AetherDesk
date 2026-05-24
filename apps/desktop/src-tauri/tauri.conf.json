@@ -2,7 +2,7 @@
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "aetherdesk",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.aetherdesk.dev",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,13 +12,14 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "AetherDesk",
         "width": 1280,
         "height": 800,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "transparent": true
+        "transparent": false
       }
     ],
     "security": {

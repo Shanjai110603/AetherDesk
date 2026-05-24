@@ -48,7 +48,7 @@ impl EventBus {
 }
 
 pub fn spawn_event_forwarder(app: AppHandle, mut receiver: broadcast::Receiver<PlatformEvent>) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         while let Ok(event) = receiver.recv().await {
             // Forward internal rust events to the Tauri frontend
             let _ = app.emit("platform-event", &event);
