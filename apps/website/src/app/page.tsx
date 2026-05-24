@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import DownloadButton from "../components/ui/DownloadButton";
-import { Github, Play, Layers, Code, Brain, Network, Terminal } from "lucide-react";
+import { Github as GithubIcon, Play, Layers, Code, Brain, Network, Terminal } from "lucide-react";
 
 export default function Home() {
   return (

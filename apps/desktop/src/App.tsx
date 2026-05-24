@@ -67,7 +67,7 @@ function App() {
     initStores();
   }, []);
 
-  const { hasCompletedOnboarding } = useWorkspaceStore();
+  const hasCompletedOnboarding = useWorkspaceStore(state => state.hasCompletedOnboarding);
 
   if (!isHydrated) {
     return (

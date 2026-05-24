@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { NexusSlashPalette } from './NexusSlashPalette';
 import { NexusMentionPalette } from './NexusMentionPalette';
 import { NEXUS_SLASH_COMMANDS, type SlashCommand } from './nexusCommands';
@@ -141,8 +141,7 @@ export const Nexus: React.FC = () => {
   const [showTempSlider, setShowTempSlider] = useState(false);
   // ── Agent Mode ──────────────────────────────────────────────────────────────
   const [agentMode, setAgentMode] = useState(false);
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
-  const [personaDropdownOpen, setPersonaDropdownOpen] = useState(false);
+  const selectedPersonaId = null;
   const [agentLoopState, setAgentLoopState] = useState<AgentLoopState>({
     status: 'idle',
     currentStep: 0,
@@ -448,6 +447,7 @@ export const Nexus: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
           </div>
           {isStreaming && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

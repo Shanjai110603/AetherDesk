@@ -55,14 +55,8 @@ ${textUntilPosition}`,
             ghostText = data.response || "";
           }
         } catch (e) {
-          // Ollama not active or threw error - fall back silently to premium mock library
-          if (textUntilPosition.endsWith('function calculateTotal(')) {
-            ghostText = "items: any[]) {\n  return items.reduce((sum, item) => sum + item.price, 0);\n}";
-          } else if (textUntilPosition.endsWith('const logger = ')) {
-            ghostText = "console.log;";
-          } else if (textUntilPosition.trim().endsWith('// TODO: implement')) {
-            ghostText = " setTimeout(() => resolve(), 1000);";
-          }
+          // Ollama not active or threw error - fail silently for autocomplete
+          console.debug("FIM autocomplete failed or Ollama inactive:", e);
         }
 
         if (!ghostText) {

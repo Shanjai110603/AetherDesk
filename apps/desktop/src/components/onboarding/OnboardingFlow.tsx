@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { diagnosticsService, DiagnosticsResult } from '../../core/services/EnvironmentDiagnosticsService';
+import { useState, useEffect } from 'react';
+import { diagnosticsService, type DiagnosticsResult } from '../../core/services/EnvironmentDiagnosticsService';
 import { useWorkspaceStore } from '../../core/store/useWorkspaceStore';
 import { CheckCircle, XCircle, Loader2, Sparkles, Folder, ArrowRight } from 'lucide-react';
 
