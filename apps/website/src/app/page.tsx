@@ -23,7 +23,7 @@ export default function Home() {
           <a href="#security" className="hover:text-white transition-colors">Local-First</a>
         </div>
         <div className="flex items-center space-x-4">
-          <a href="https://github.com/AetherDesk/AetherDesk" target="_blank" rel="noreferrer" className="text-gray-300 hover:text-white transition-colors">
+          <a href="https://github.com/Shanjai110603/AetherDesk" target="_blank" rel="noreferrer" className="text-gray-300 hover:text-white transition-colors">
             <GithubIcon className="w-6 h-6" />
           </a>
         </div>

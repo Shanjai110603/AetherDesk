@@ -6,6 +6,9 @@ import { motion } from "framer-motion";
 
 type OS = "Windows" | "macOS" | "Linux" | "Unknown";
 
+const REPO = "Shanjai110603/AetherDesk";
+const RELEASES_URL = `https://github.com/${REPO}/releases`;
+
 export default function DownloadButton() {
   const [os, setOs] = useState<OS>("Unknown");
   
@@ -17,13 +20,13 @@ export default function DownloadButton() {
   }, []);
 
   const getDownloadInfo = () => {
-    // Note: These URLs represent the GitHub Actions release strategy
-    const baseUrl = "https://github.com/AetherDesk/AetherDesk/releases/latest/download";
+    // These filenames match the Tauri NSIS/DMG/DEB output from GitHub Actions
+    const baseUrl = `${RELEASES_URL}/latest/download`;
     switch (os) {
-      case "Windows": return { text: "Download for Windows", icon: <Monitor className="w-5 h-5 mr-2" />, url: `${baseUrl}/AetherDeskSetup.exe` };
-      case "macOS": return { text: "Download for macOS", icon: <Apple className="w-5 h-5 mr-2" />, url: `${baseUrl}/AetherDesk.dmg` };
-      case "Linux": return { text: "Download for Linux", icon: <Terminal className="w-5 h-5 mr-2" />, url: `${baseUrl}/AetherDesk.AppImage` };
-      default: return { text: "Download AetherDesk", icon: <Download className="w-5 h-5 mr-2" />, url: "https://github.com/AetherDesk/AetherDesk/releases" };
+      case "Windows": return { text: "Download for Windows", icon: <Monitor className="w-5 h-5 mr-2" />, url: `${baseUrl}/aetherdesk_0.1.0_x64-setup.exe` };
+      case "macOS": return { text: "Download for macOS", icon: <Apple className="w-5 h-5 mr-2" />, url: `${baseUrl}/aetherdesk_0.1.0_universal.dmg` };
+      case "Linux": return { text: "Download for Linux", icon: <Terminal className="w-5 h-5 mr-2" />, url: `${baseUrl}/aetherdesk_0.1.0_amd64.deb` };
+      default: return { text: "Download AetherDesk", icon: <Download className="w-5 h-5 mr-2" />, url: RELEASES_URL };
     }
   };
 
