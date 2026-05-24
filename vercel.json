@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npm run build --workspace=website",
+  "outputDirectory": "apps/website/out",
+  "installCommand": "npm install"
+}
